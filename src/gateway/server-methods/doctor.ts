@@ -712,6 +712,26 @@ async function readKnowledgeGraph(
   }
 }
 
+// 懒加载切片：按 parentId 过滤节点，控制单次响应大小。
+// parentId=null → 只留 tier<3（类别/维度结构，供逐层下钻的骨架）。
+// parentId=<维度 id> → 只留该维度下的 tier3 叶子（带 content/facts/related 依据）。
+// person/categories/edges 原样带上（都很小），客户端把叶子合并进已有骨架。
+function sliceKnowledgeGraph(graph: unknown, parentId: string | null): unknown {
+  if (!graph || typeof graph !== "object") {
+    return graph;
+  }
+  const g = graph as Record<string, unknown>;
+  const nodes = Array.isArray(g.nodes) ? (g.nodes as Array<Record<string, unknown>>) : [];
+  const picked = nodes.filter((n) => {
+    const tier = typeof n.tier === "number" ? (n.tier as number) : 2;
+    if (parentId === null) {
+      return tier < 3;
+    }
+    return tier === 3 && n.parentId === parentId;
+  });
+  return { ...g, nodes: picked };
+}
+
 function shouldProbeMemoryEmbeddings(params: unknown): boolean {
   if (!params || typeof params !== "object") {
     return false;
@@ -849,10 +869,16 @@ export const doctorHandlers: GatewayRequestHandlers = {
       typeof params?.agentId === "string" ? normalizeAgentId(params.agentId) : null;
     const agentId = requestedAgentId || resolveDefaultAgentId(cfg);
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
-    const graph = await readKnowledgeGraph(workspaceDir);
+    const read = await readKnowledgeGraph(workspaceDir);
+    // 懒加载切片：完整图可能很大（数百 KB），一次性发会撞 talk 通道大小上限 → 超时。
+    // 无 parentId → 只发结构（tier<3 类别/维度，小）；parentId=维度 id → 只发该维度的 tier3 叶子。
+    const parentId = typeof params?.parentId === "string" ? params.parentId : null;
     const payload: DoctorMemoryKnowledgeGraphPayload = {
       agentId,
-      ...graph,
+      found: read.found,
+      path: read.path,
+      updatedAtMs: read.updatedAtMs,
+      graph: read.found ? sliceKnowledgeGraph(read.graph, parentId) : undefined,
     };
     respond(true, payload, undefined);
   },
