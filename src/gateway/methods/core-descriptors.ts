@@ -228,6 +228,9 @@ export const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   { name: "nativeHook.invoke", scope: "operator.admin", advertise: false },
   { name: "web.login.start", scope: "operator.admin", advertise: false },
   { name: "web.login.wait", scope: "operator.admin", advertise: false },
+  // 只读记忆图谱（配对设备默认可调）。追加在表尾而非归到 doctor.memory.* 组：
+  // server-methods-list 测试用 slice(0,5)/slice(32,37) 钉了前段顺序，中插会顶偏。
+  { name: "doctor.memory.knowledgeGraph", scope: "operator.read" },
 ] as const;
 
 const CORE_GATEWAY_METHOD_SPEC_BY_NAME: ReadonlyMap<string, CoreGatewayMethodSpec> = new Map(

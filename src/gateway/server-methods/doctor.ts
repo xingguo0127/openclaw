@@ -33,6 +33,8 @@ const MANAGED_DEEP_SLEEP_CRON_NAME = "Memory Dreaming Promotion";
 const MANAGED_DEEP_SLEEP_CRON_TAG = "[managed-by=memory-core.short-term-promotion]";
 const DEEP_SLEEP_SYSTEM_EVENT_TEXT = "__openclaw_memory_core_short_term_promotion_dream__";
 const DREAM_DIARY_FILE_NAMES = ["DREAMS.md", "dreams.md"] as const;
+// 个人知识图谱产物：阶段1 手工放此文件、阶段2 由 kg-worker 写入（graph.json 契约 §2.1）。
+const KNOWLEDGE_GRAPH_REL_PATH = path.join("memory", "knowledge-graph.json");
 const REM_HARNESS_DEFAULT_CANDIDATE_LIMIT = 25;
 const REM_HARNESS_MAX_CANDIDATE_LIMIT = 100;
 const REM_HARNESS_MAX_GROUNDED_FILES = 10;
@@ -132,6 +134,15 @@ export type DoctorMemoryDreamDiaryPayload = {
   found: boolean;
   path: string;
   content?: string;
+  updatedAtMs?: number;
+};
+
+export type DoctorMemoryKnowledgeGraphPayload = {
+  agentId: string;
+  found: boolean;
+  path: string;
+  // 解析后的 graph.json 对象（§2.1 契约）；found=false 时省略。客户端 KnowledgeGraphParser 直接吃。
+  graph?: unknown;
   updatedAtMs?: number;
 };
 
@@ -669,6 +680,38 @@ async function readDreamDiary(
   };
 }
 
+// 读 workspace 里的知识图谱产物（memory/knowledge-graph.json）。
+// 仿 readDreamDiary：softlink/非文件/缺失/解析失败一律 found=false，绝不抛。
+async function readKnowledgeGraph(
+  workspaceDir: string,
+): Promise<Omit<DoctorMemoryKnowledgeGraphPayload, "agentId">> {
+  const filePath = path.join(workspaceDir, KNOWLEDGE_GRAPH_REL_PATH);
+  let stat;
+  try {
+    stat = await fs.lstat(filePath);
+  } catch {
+    // ENOENT 或其它读不到 → 还没有图，不算错。
+    return { found: false, path: KNOWLEDGE_GRAPH_REL_PATH };
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    // 重定向/非文件不认，只读真实 workspace 文件（同 dreamDiary 边界）。
+    return { found: false, path: KNOWLEDGE_GRAPH_REL_PATH };
+  }
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    const graph = JSON.parse(raw) as unknown;
+    return {
+      found: true,
+      path: KNOWLEDGE_GRAPH_REL_PATH,
+      graph,
+      updatedAtMs: Math.floor(stat.mtimeMs),
+    };
+  } catch {
+    // 文件在但读/解析失败 → 当作没有，客户端出空态而非报错。
+    return { found: false, path: KNOWLEDGE_GRAPH_REL_PATH };
+  }
+}
+
 function shouldProbeMemoryEmbeddings(params: unknown): boolean {
   if (!params || typeof params !== "object") {
     return false;
@@ -797,6 +840,19 @@ export const doctorHandlers: GatewayRequestHandlers = {
     const payload: DoctorMemoryDreamDiaryPayload = {
       agentId,
       ...dreamDiary,
+    };
+    respond(true, payload, undefined);
+  },
+  "doctor.memory.knowledgeGraph": async ({ respond, context, params }) => {
+    const cfg = context.getRuntimeConfig();
+    const requestedAgentId =
+      typeof params?.agentId === "string" ? normalizeAgentId(params.agentId) : null;
+    const agentId = requestedAgentId || resolveDefaultAgentId(cfg);
+    const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+    const graph = await readKnowledgeGraph(workspaceDir);
+    const payload: DoctorMemoryKnowledgeGraphPayload = {
+      agentId,
+      ...graph,
     };
     respond(true, payload, undefined);
   },
