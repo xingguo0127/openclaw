@@ -208,4 +208,6 @@ export type RealtimeVoiceBargeInOptions = {
   audioPlaybackActive?: boolean;
   /** Interrupt even when normal barge-in audio-duration guards would treat the event as echo. */
   force?: boolean;
+  /** Drop any queued provider continuation that belongs to the interrupted response. */
+  discardPendingResponse?: boolean;
 };

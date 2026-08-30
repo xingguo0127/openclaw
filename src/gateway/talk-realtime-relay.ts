@@ -60,6 +60,7 @@ const RELAY_TRANSCRIPT_ECHO_LOOKBACK_MS = 12_000;
 const FORCED_CONSULT_FALLBACK_DELAY_MS = 200;
 const FORCED_CONSULT_RESULT_MAX_CHARS = 1_800;
 const MAX_CANCELLED_RELAY_TOOL_CALLS = 128;
+const MAX_RELAY_RESPONSE_CORRELATIONS = 128;
 
 type TalkRealtimeRelayEventPayload =
   | { relaySessionId: string; type: "ready" }
@@ -129,6 +130,8 @@ type RelaySession = {
     }
   >;
   cancelledToolCalls: Map<string, { turnId: string }>;
+  responseTurns: Map<string, string>;
+  providerCancelRequests: Array<{ turnId: string; toolContinuation: boolean }>;
   forcedConsults: RealtimeVoiceForcedConsultCoordinator;
   transcript: RealtimeVoiceTranscriptEntry[];
 };
@@ -499,8 +502,35 @@ export function createTalkRealtimeRelaySession(
       },
     },
     onEvent: (event) => {
+      const relay = relayRef.current;
+      if (event.direction === "client") {
+        if (event.type === "response.cancel" && relay?.talk.activeTurnId) {
+          relay.providerCancelRequests.push({
+            turnId: relay.talk.activeTurnId,
+            toolContinuation: event.detail?.includes("reason=deliver-tool-result") === true,
+          });
+          if (relay.providerCancelRequests.length > MAX_RELAY_RESPONSE_CORRELATIONS) {
+            relay.providerCancelRequests.shift();
+          }
+        }
+        return;
+      }
       if (event.direction !== "server") {
         return;
+      }
+      if (
+        event.responseId &&
+        relay?.talk.activeTurnId &&
+        !relay.responseTurns.has(event.responseId)
+      ) {
+        relay.responseTurns.set(event.responseId, relay.talk.activeTurnId);
+        while (relay.responseTurns.size > MAX_RELAY_RESPONSE_CORRELATIONS) {
+          const oldestResponseId = relay.responseTurns.keys().next().value;
+          if (typeof oldestResponseId !== "string") {
+            break;
+          }
+          relay.responseTurns.delete(oldestResponseId);
+        }
       }
       if (
         event.type === "conversation.output_audio.delta" ||
@@ -518,15 +548,8 @@ export function createTalkRealtimeRelaySession(
         event.type === "response.done" ||
         event.type === "response.cancelled"
       ) {
-        const relay = relayRef.current;
         const talkEvent = relay
-          ? event.type === "response.done"
-            ? finishRelayTurnAfterProviderResponse(relay)
-            : event.type === "response.cancelled"
-              ? hasExpectedRelayToolContinuationCancellation(relay)
-                ? finishRelayTurnAfterProviderResponse(relay)
-                : cancelRelayTurnState(relay, "provider-response-cancelled")
-              : undefined
+          ? settleRelayProviderResponse(relay, event.type, event.responseId)
           : undefined;
         emit(
           {
@@ -719,6 +742,8 @@ export function createTalkRealtimeRelaySession(
     completedAgentToolCalls: new Set(),
     toolCalls: new Map(),
     cancelledToolCalls: new Map(),
+    responseTurns: new Map(),
+    providerCancelRequests: [],
     forcedConsults: createRealtimeVoiceForcedConsultCoordinator(),
     transcript: [],
   };
@@ -787,18 +812,27 @@ function finishRelayTurnAfterProviderResponse(session: RelaySession): TalkEvent 
   return ended.ok ? ended.event : undefined;
 }
 
-function hasExpectedRelayToolContinuationCancellation(session: RelaySession): boolean {
-  const activeTurnId = session.talk.activeTurnId;
-  return Boolean(
-    activeTurnId &&
-    [...session.toolCalls.values()].some(
-      (call) =>
-        call.turnId === activeTurnId &&
-        call.resultSubmitted &&
-        call.expectsContinuation &&
-        !call.functionResponseDone,
-    ),
-  );
+function settleRelayProviderResponse(
+  session: RelaySession,
+  eventType: string,
+  responseId: string | undefined,
+): TalkEvent | undefined {
+  if (eventType !== "response.done" && eventType !== "response.cancelled") {
+    return undefined;
+  }
+  const correlatedTurnId = responseId ? session.responseTurns.get(responseId) : undefined;
+  if (responseId) {
+    session.responseTurns.delete(responseId);
+  }
+  const cancelRequest = session.providerCancelRequests.shift();
+  const terminalTurnId = correlatedTurnId ?? cancelRequest?.turnId ?? session.talk.activeTurnId;
+  if (!terminalTurnId || terminalTurnId !== session.talk.activeTurnId) {
+    return undefined;
+  }
+  if (eventType === "response.done" || cancelRequest?.toolContinuation === true) {
+    return finishRelayTurnAfterProviderResponse(session);
+  }
+  return cancelRelayTurnState(session, "provider-response-cancelled");
 }
 
 function rememberCancelledRelayToolCalls(session: RelaySession, turnId: string): void {
@@ -1042,18 +1076,37 @@ export function submitTalkRealtimeRelayToolResult(params: {
     return;
   }
   const toolCall = session.toolCalls.get(params.callId);
+  const registeredAgentRunId = session.activeAgentToolCalls.get(params.callId);
+  if (!toolCall && registeredAgentRunId) {
+    session.bridge.submitToolResult(params.callId, params.result, params.options);
+    const turnId = ensureRelayTurn(session);
+    const final = params.options?.willContinue !== true;
+    if (final) {
+      session.activeAgentRuns.delete(registeredAgentRunId);
+      session.activeAgentToolCalls.delete(params.callId);
+    }
+    broadcastToolResultToOwner(session, {
+      callId: params.callId,
+      turnId,
+      result: params.result,
+      final,
+    });
+    return;
+  }
+  if (!toolCall) {
+    session.bridge.submitToolResult(params.callId, params.result, { suppressResponse: true });
+    return;
+  }
   const providerOptions: RealtimeVoiceToolResultOptions | undefined =
-    toolCall?.name === FLOWGO_EXPRESSION_TOOL_NAME
+    toolCall.name === FLOWGO_EXPRESSION_TOOL_NAME
       ? { responseMode: "silent-side-effect" }
       : params.options;
   session.bridge.submitToolResult(params.callId, params.result, providerOptions);
-  const turnId = toolCall?.turnId ?? ensureRelayTurn(session);
+  const turnId = toolCall.turnId;
   const final = params.options?.willContinue !== true;
   if (final) {
-    if (toolCall) {
-      toolCall.resultSubmitted = true;
-      toolCall.expectsContinuation = providerOptions?.suppressResponse !== true;
-    }
+    toolCall.resultSubmitted = true;
+    toolCall.expectsContinuation = providerOptions?.suppressResponse !== true;
     const runId = session.activeAgentToolCalls.get(params.callId);
     if (runId) {
       session.activeAgentRuns.delete(runId);
@@ -1146,7 +1199,10 @@ export function cancelTalkRealtimeRelayTurn(params: {
   const session = getRelaySession(params.relaySessionId, params.connId);
   const reason = params.reason ?? "client-cancelled";
   cancelForcedConsults(session);
-  session.bridge.handleBargeIn({ audioPlaybackActive: true });
+  session.bridge.handleBargeIn({
+    audioPlaybackActive: true,
+    discardPendingResponse: true,
+  });
   abortRelayAgentRuns(session, reason);
   const talkEvent = cancelRelayTurnState(session, reason);
   broadcastToOwner(session.context, session.connId, {

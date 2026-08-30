@@ -822,6 +822,11 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
   }
 
   handleBargeIn(options?: RealtimeVoiceBargeInOptions): void {
+    if (options?.discardPendingResponse === true) {
+      this.responseCreatePending = false;
+      this.pendingResponseInstructions = undefined;
+      this.continuingToolCallIds.clear();
+    }
     const assistantItemId = this.lastAssistantItemId;
     const responseStartTimestamp = this.responseStartTimestamp;
     const force = options?.force === true;

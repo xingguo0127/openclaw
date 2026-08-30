@@ -417,7 +417,10 @@ describe("talk realtime gateway relay", () => {
       { status: "already_delivered" },
       { suppressResponse: true },
     );
-    expect(bridge.handleBargeIn).toHaveBeenCalledWith({ audioPlaybackActive: true });
+    expect(bridge.handleBargeIn).toHaveBeenCalledWith({
+      audioPlaybackActive: true,
+      discardPendingResponse: true,
+    });
     expect(bridge.close).toHaveBeenCalled();
     const inputAudioPayload = findEventPayload(
       events,
@@ -1227,7 +1230,12 @@ describe("talk realtime gateway relay", () => {
 
     bridgeRequest?.onTranscript?.("user", "first", true);
     bridgeRequest?.onTranscript?.("assistant", "one", true);
-    bridgeRequest?.onEvent?.({ direction: "server", type: "response.done" });
+    bridgeRequest?.onEvent?.({
+      direction: "client",
+      type: "response.cancel",
+      detail: "reason=deliver-tool-result",
+    });
+    bridgeRequest?.onEvent?.({ direction: "server", type: "response.cancelled" });
     bridgeRequest?.onTranscript?.("user", "second", true);
     bridgeRequest?.onTranscript?.("assistant", "two", true);
     bridgeRequest?.onEvent?.({ direction: "server", type: "response.done" });
@@ -1401,6 +1409,23 @@ describe("talk realtime gateway relay", () => {
     });
 
     bridgeRequest?.onTranscript?.("user", "first", true);
+    bridgeRequest?.onEvent?.({
+      direction: "server",
+      type: "response.audio.delta",
+      responseId: "response-1",
+    });
+    bridgeRequest?.onToolCall?.({
+      itemId: "item-expression-submitted",
+      callId: "call-expression-submitted",
+      name: "flowgo_show_expression",
+      args: { expression: "happy" },
+    });
+    submitTalkRealtimeRelayToolResult({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-1",
+      callId: "call-expression-submitted",
+      result: { ok: true },
+    });
     bridgeRequest?.onToolCall?.({
       itemId: "item-expression",
       callId: "call-expression",
@@ -1419,13 +1444,28 @@ describe("talk realtime gateway relay", () => {
       result: { ok: true },
     });
     bridgeRequest?.onTranscript?.("user", "second", true);
+    bridgeRequest?.onEvent?.({
+      direction: "server",
+      type: "response.cancelled",
+      responseId: "response-1",
+    });
 
-    expect(submitToolResult).toHaveBeenCalledOnce();
-    expect(submitToolResult).toHaveBeenCalledWith(
+    expect(submitToolResult).toHaveBeenCalledTimes(2);
+    expect(submitToolResult).toHaveBeenNthCalledWith(
+      1,
+      "call-expression-submitted",
+      { ok: true },
+      { responseMode: "silent-side-effect" },
+    );
+    expect(submitToolResult).toHaveBeenNthCalledWith(
+      2,
       "call-expression",
       { ok: true },
       { suppressResponse: true },
     );
+    expect(
+      talkEvents.filter((event) => event.type === "turn.cancelled").map((event) => event.turnId),
+    ).not.toContain("turn-2");
     expect(
       talkEvents.filter((event) => event.type === "turn.cancelled").map((event) => event.turnId),
     ).toEqual(["turn-1"]);
@@ -1436,6 +1476,75 @@ describe("talk realtime gateway relay", () => {
       talkEvents.find((event) => event.type === "tool.result" && event.callId === "call-expression")
         ?.turnId,
     ).toBe("turn-1");
+  });
+
+  it("fails closed when a cancelled tool result arrives after tombstone eviction", () => {
+    let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
+    const submitToolResult = vi.fn();
+    const provider: RealtimeVoiceProviderPlugin = {
+      id: "relay-test",
+      label: "Relay Test",
+      isConfigured: () => true,
+      createBridge: (req) => {
+        bridgeRequest = req;
+        return {
+          connect: vi.fn(async () => undefined),
+          sendAudio: vi.fn(),
+          setMediaTimestamp: vi.fn(),
+          handleBargeIn: vi.fn(),
+          submitToolResult,
+          acknowledgeMark: vi.fn(),
+          close: vi.fn(),
+          isConnected: vi.fn(() => true),
+        };
+      },
+    };
+    const talkEvents: Array<{ type?: string; turnId?: string }> = [];
+    const context = {
+      broadcastToConnIds: (_event: string, payload: { talkEvent?: { type?: string } }) => {
+        if (payload.talkEvent) {
+          talkEvents.push(payload.talkEvent);
+        }
+      },
+    } as never;
+    const session = createTalkRealtimeRelaySession({
+      context,
+      connId: "conn-1",
+      provider,
+      providerConfig: {},
+      instructions: "brief",
+      tools: [],
+    });
+
+    bridgeRequest?.onTranscript?.("user", "first", true);
+    for (let index = 0; index < 129; index += 1) {
+      bridgeRequest?.onToolCall?.({
+        itemId: `item-${index}`,
+        callId: `call-${index}`,
+        name: "flowgo_show_expression",
+        args: { expression: "happy" },
+      });
+    }
+    cancelTalkRealtimeRelayTurn({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-1",
+      reason: "barge-in",
+    });
+    submitTalkRealtimeRelayToolResult({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-1",
+      callId: "call-0",
+      result: { ok: true },
+    });
+
+    expect(submitToolResult).toHaveBeenCalledWith(
+      "call-0",
+      { ok: true },
+      { suppressResponse: true },
+    );
+    expect(
+      talkEvents.filter((event) => event.type === "turn.started").map((event) => event.turnId),
+    ).toEqual(["turn-1"]);
   });
 
   it("aborts linked agent consult runs when the relay turn is cancelled", () => {
