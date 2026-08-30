@@ -103,6 +103,11 @@ describe("Qwen realtime tool contract", () => {
 
     state.handleEvent({ type: "input_audio_buffer.speech_started" });
 
+    expect(onEvent).toHaveBeenCalledWith({
+      direction: "client",
+      type: "response.barge_in",
+      detail: "reason=provider-vad state=response-create-in-flight",
+    });
     expect(state.responseCreatePending).toBe(false);
     expect(state.pendingResponseInstructions).toBeUndefined();
     expect(state.continuingToolCallIds.size).toBe(0);

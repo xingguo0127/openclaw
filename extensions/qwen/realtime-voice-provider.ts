@@ -735,6 +735,13 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
           // responseActive=true(还在生成)→ 走完整打断(response.cancel + truncate + 清 app 缓冲);
           // responseActive=false(已生成完,只剩 app 缓冲在放)→ 直接清 app 缓冲,让用户插话立即生效。
           if (this.responseActive || this.responseCreateInFlight) {
+            this.config.onEvent?.({
+              direction: "client",
+              type: "response.barge_in",
+              detail: this.responseActive
+                ? "reason=provider-vad state=active-response"
+                : "reason=provider-vad state=response-create-in-flight",
+            });
             this.handleBargeIn({ audioPlaybackActive: true });
           } else {
             this.config.onClearAudio();

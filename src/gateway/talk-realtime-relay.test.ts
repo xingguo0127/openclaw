@@ -1346,7 +1346,7 @@ describe("talk realtime gateway relay", () => {
         }
       },
     } as never;
-    createTalkRealtimeRelaySession({
+    const session = createTalkRealtimeRelaySession({
       context,
       connId: "conn-1",
       provider,
@@ -1359,18 +1359,31 @@ describe("talk realtime gateway relay", () => {
     bridgeRequest?.onEvent?.({ direction: "server", type: "response.cancelled" });
     bridgeRequest?.onTranscript?.("user", "second", true);
     bridgeRequest?.onEvent?.({
+      direction: "client",
+      type: "response.barge_in",
+      detail: "reason=provider-vad state=active-response",
+    });
+    bridgeRequest?.onClearAudio();
+    bridgeRequest?.onEvent?.({ direction: "server", type: "response.cancelled" });
+    bridgeRequest?.onTranscript?.("user", "third", true);
+    bridgeRequest?.onEvent?.({ direction: "server", type: "response.done" });
+    sendTalkRealtimeRelayAudio({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-1",
+      audioBase64: Buffer.from("next audio").toString("base64"),
+    });
+    bridgeRequest?.onEvent?.({
       direction: "server",
       type: "input_audio_buffer.speech_started",
     });
-    bridgeRequest?.onClearAudio();
-    bridgeRequest?.onTranscript?.("user", "third", true);
+    bridgeRequest?.onTranscript?.("user", "fourth", true);
 
     expect(
       talkEvents.filter((event) => event.type === "turn.cancelled").map((event) => event.turnId),
     ).toEqual(["turn-1", "turn-2"]);
     expect(
       talkEvents.filter((event) => event.type === "turn.started").map((event) => event.turnId),
-    ).toEqual(["turn-1", "turn-2", "turn-3"]);
+    ).toEqual(["turn-1", "turn-2", "turn-3", "turn-4"]);
   });
 
   it("settles a late expression result without reopening its cancelled turn", () => {
