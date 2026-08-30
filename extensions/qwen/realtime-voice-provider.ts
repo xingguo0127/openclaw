@@ -675,7 +675,8 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
       }
       if (
         event.type.startsWith("response.") ||
-        event.type.startsWith("conversation.output_audio.")
+        event.type.startsWith("conversation.output_audio.") ||
+        (event.type === "conversation.item.done" && event.item?.type === "function_call")
       ) {
         return;
       }
@@ -733,7 +734,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
           // barge-in:qwen 生成很快、常在用户开口前就 response.done,此时 app 仍在放排队的缓冲音频。
           // responseActive=true(还在生成)→ 走完整打断(response.cancel + truncate + 清 app 缓冲);
           // responseActive=false(已生成完,只剩 app 缓冲在放)→ 直接清 app 缓冲,让用户插话立即生效。
-          if (this.responseActive) {
+          if (this.responseActive || this.responseCreateInFlight) {
             this.handleBargeIn({ audioPlaybackActive: true });
           } else {
             this.config.onClearAudio();
@@ -836,6 +837,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
         if (detail === QWEN_REALTIME_NO_ACTIVE_RESPONSE_CANCEL_ERROR) {
           this.responseActive = false;
           this.responseCancelInFlight = false;
+          this.discardResponseAfterCreate = false;
           this.flushPendingResponseCreate();
           break;
         }

@@ -71,21 +71,29 @@ describe("Qwen realtime tool contract", () => {
   it("drops a queued silent continuation on provider VAD barge-in", () => {
     const onAudio = vi.fn();
     const onEvent = vi.fn();
+    const onToolCall = vi.fn();
     const bridge = buildQwenRealtimeVoiceProvider().createBridge({
       providerConfig: { apiKey: "test-key" },
       onAudio,
       onClearAudio: () => undefined,
-      onToolCall: () => undefined,
+      onToolCall,
       onEvent,
     } as never);
     const state = bridge as unknown as {
       responseCreatePending: boolean;
       responseCreateInFlight: boolean;
+      responseCancelInFlight: boolean;
       discardResponseAfterCreate: boolean;
       pendingResponseInstructions?: string;
       continuingToolCallIds: Set<string>;
       sendEvent: ReturnType<typeof vi.fn>;
-      handleEvent: (event: { type: string; delta?: string; response?: { id: string } }) => void;
+      handleEvent: (event: {
+        type: string;
+        delta?: string;
+        response?: { id: string };
+        error?: { message: string };
+        item?: { id: string; type: string; call_id: string; name: string; arguments: string };
+      }) => void;
     };
     state.responseCreatePending = true;
     state.responseCreateInFlight = true;
@@ -93,12 +101,13 @@ describe("Qwen realtime tool contract", () => {
     state.continuingToolCallIds.add("call-expression");
     state.sendEvent = vi.fn();
 
-    bridge.handleBargeIn?.({ audioPlaybackActive: true });
+    state.handleEvent({ type: "input_audio_buffer.speech_started" });
 
     expect(state.responseCreatePending).toBe(false);
     expect(state.pendingResponseInstructions).toBeUndefined();
     expect(state.continuingToolCallIds.size).toBe(0);
     expect(state.discardResponseAfterCreate).toBe(true);
+    onEvent.mockClear();
 
     state.handleEvent({ type: "response.created", response: { id: "stale-response" } });
     expect(state.sendEvent).toHaveBeenCalledWith(
@@ -107,8 +116,28 @@ describe("Qwen realtime tool contract", () => {
     );
     state.handleEvent({ type: "response.audio.delta", delta: "AAAA" });
     expect(onAudio).not.toHaveBeenCalled();
+    state.handleEvent({
+      type: "conversation.item.done",
+      item: {
+        id: "stale-tool-item",
+        type: "function_call",
+        call_id: "stale-tool-call",
+        name: "flowgo_show_expression",
+        arguments: '{"expression":"happy"}',
+      },
+    });
+    expect(onToolCall).not.toHaveBeenCalled();
     state.handleEvent({ type: "response.cancelled" });
     expect(state.discardResponseAfterCreate).toBe(false);
     expect(onEvent).not.toHaveBeenCalled();
+
+    state.discardResponseAfterCreate = true;
+    state.responseCancelInFlight = true;
+    state.handleEvent({
+      type: "error",
+      error: { message: "Cancellation failed: no active response found" },
+    });
+    expect(state.discardResponseAfterCreate).toBe(false);
+    expect(state.responseCancelInFlight).toBe(false);
   });
 });

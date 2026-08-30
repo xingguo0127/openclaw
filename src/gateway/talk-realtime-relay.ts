@@ -477,15 +477,17 @@ export function createTalkRealtimeRelaySession(
         );
       },
       clearAudio: () => {
-        const turnId = relayRef.current ? ensureRelayTurn(relayRef.current) : undefined;
+        const turnId = relayRef.current?.talk.activeTurnId;
         emit(
           { relaySessionId, type: "clear" },
-          {
-            type: "output.audio.done",
-            turnId,
-            payload: { reason: "clear" },
-            final: true,
-          },
+          turnId
+            ? {
+                type: "output.audio.done",
+                turnId,
+                payload: { reason: "clear" },
+                final: true,
+              }
+            : undefined,
         );
       },
       sendMark: (markName) => {
@@ -535,6 +537,10 @@ export function createTalkRealtimeRelaySession(
           }
           relay.responseTurns.delete(oldestResponseId);
         }
+      }
+      if (event.type === "input_audio_buffer.speech_started" && relay) {
+        emit({ relaySessionId, type: "clear" }, cancelRelayTurnState(relay, "provider-barge-in"));
+        return;
       }
       if (
         event.type === "conversation.output_audio.delta" ||

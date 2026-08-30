@@ -1358,13 +1358,19 @@ describe("talk realtime gateway relay", () => {
     bridgeRequest?.onTranscript?.("user", "first", true);
     bridgeRequest?.onEvent?.({ direction: "server", type: "response.cancelled" });
     bridgeRequest?.onTranscript?.("user", "second", true);
+    bridgeRequest?.onEvent?.({
+      direction: "server",
+      type: "input_audio_buffer.speech_started",
+    });
+    bridgeRequest?.onClearAudio();
+    bridgeRequest?.onTranscript?.("user", "third", true);
 
     expect(
       talkEvents.filter((event) => event.type === "turn.cancelled").map((event) => event.turnId),
-    ).toEqual(["turn-1"]);
+    ).toEqual(["turn-1", "turn-2"]);
     expect(
       talkEvents.filter((event) => event.type === "turn.started").map((event) => event.turnId),
-    ).toEqual(["turn-1", "turn-2"]);
+    ).toEqual(["turn-1", "turn-2", "turn-3"]);
   });
 
   it("settles a late expression result without reopening its cancelled turn", () => {
