@@ -347,11 +347,16 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           requested: params,
           defaults: realtimeConfig,
         });
+        const providerConfig = withRealtimeBrowserOverrides(
+          resolution.providerConfig,
+          launchOptions,
+        );
+        const effectiveModel = normalizeOptionalString(providerConfig.model) ?? launchOptions.model;
         const forceAgentConsult = realtimeConfig.consultRouting === "force-agent-consult";
         const capabilities = resolution.provider.capabilities;
         const supportsToolCalls =
           capabilities?.supportsToolCalls === true &&
-          (capabilities.supportsToolCallsForModel?.(launchOptions.model) ?? true);
+          (capabilities.supportsToolCallsForModel?.(effectiveModel) ?? true);
         const requestedCapabilities = new Set(params.clientCapabilities ?? []);
         const flowgoExpressionEnabled =
           !forceAgentConsult &&
@@ -372,14 +377,14 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           connId,
           cfg: runtimeConfig,
           provider: resolution.provider,
-          providerConfig: withRealtimeBrowserOverrides(resolution.providerConfig, launchOptions),
+          providerConfig,
           instructions: buildRealtimeInstructions(realtimeConfig.instructions),
           // force 模式下网关每轮强制转交,provider 无需(也不应)持有任何工具 —— 否则:
           //   ①调 consult → 与强制转交双重进 DeepSeek(文本去重按串匹配,改写 vs 原话 → 去重失效);
           //   ②调 control → app 侧把 control 重路由成 consult,同样双重。
           // 故 force 时**不给任何工具**,qwen 只管念强制转交回来的结果;停/改这类由 DeepSeek 逐轮处理。
           tools,
-          model: launchOptions.model,
+          model: effectiveModel,
           sessionKey: routedSessionKey,
           voice: launchOptions.voice,
           forceAgentConsultOnFinalTranscript: forceAgentConsult,

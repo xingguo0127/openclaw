@@ -74,7 +74,9 @@ const CONTINUE_AFTER_SILENT_SIDE_EFFECT_INSTRUCTIONS =
   "继续自然完成当前对用户的语音回复。不要提及刚才的工具、工具参数、工具结果、表情或内部执行状态。";
 
 export function supportsQwenRealtimeToolCalls(model: string | undefined): boolean {
-  return (model ?? QWEN_REALTIME_DEFAULT_MODEL).startsWith("qwen3.5-omni-");
+  return /^qwen3\.5-omni-(?:flash|plus)-realtime(?:-\d{4}-\d{2}-\d{2})?$/.test(
+    model ?? QWEN_REALTIME_DEFAULT_MODEL,
+  );
 }
 
 export function toQwenRealtimeTools(tools: RealtimeVoiceTool[]): Array<{

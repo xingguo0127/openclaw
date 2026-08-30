@@ -1050,6 +1050,125 @@ describe("talk.session unified handlers", () => {
     expectRespondOk(respond, { negotiatedCapabilities: [] });
   });
 
+  it("uses the provider-specific model when gating FlowGo expression tools", async () => {
+    const supportsToolCallsForModel = vi.fn(
+      (model: string | undefined) => model !== "qwen3-omni-flash-realtime",
+    );
+    const provider = {
+      id: "qwen",
+      label: "Qwen Realtime",
+      isConfigured: () => true,
+      capabilities: {
+        supportsToolCalls: true,
+        supportsToolCallsForModel,
+      },
+      createBridge: vi.fn(),
+    };
+    mocks.resolveConfiguredRealtimeVoiceProvider.mockReturnValue({
+      provider,
+      providerConfig: {
+        apiKey: "provider-key",
+        model: "qwen3-omni-flash-realtime",
+      },
+    });
+    mocks.createTalkRealtimeRelaySession.mockReturnValue({
+      provider: "qwen",
+      transport: "gateway-relay",
+      relaySessionId: "relay-provider-model-1",
+      audio: {
+        inputEncoding: "pcm16",
+        inputSampleRateHz: 24000,
+        outputEncoding: "pcm16",
+        outputSampleRateHz: 24000,
+      },
+    });
+
+    const respond = vi.fn();
+    await talkHandlers["talk.session.create"]({
+      req: { type: "req", id: "provider-model", method: "talk.session.create" },
+      params: {
+        mode: "realtime",
+        transport: "gateway-relay",
+        brain: "agent-consult",
+        clientCapabilities: ["flowgo.expression.v1"],
+      },
+      client: { connId: "conn-provider-model" } as never,
+      isWebchatConnect: () => false,
+      respond: respond as never,
+      context: {
+        getRuntimeConfig: () =>
+          ({
+            talk: {
+              realtime: {
+                provider: "qwen",
+                providers: {
+                  qwen: {
+                    apiKey: "provider-key",
+                    model: "qwen3-omni-flash-realtime",
+                  },
+                },
+                consultRouting: "provider-direct",
+              },
+            },
+          }) as OpenClawConfig,
+      } as never,
+    });
+
+    expect(supportsToolCallsForModel).toHaveBeenCalledWith("qwen3-omni-flash-realtime");
+    const relayInput = mockCallArg(mocks.createTalkRealtimeRelaySession) as Record<string, unknown>;
+    expect(relayInput.model).toBe("qwen3-omni-flash-realtime");
+    expect(relayInput.tools).toEqual([
+      expect.objectContaining({ name: "openclaw_agent_consult" }),
+      expect.objectContaining({ name: "openclaw_agent_control" }),
+    ]);
+    expectRespondOk(respond, { negotiatedCapabilities: [] });
+
+    const overrideRespond = vi.fn();
+    await talkHandlers["talk.session.create"]({
+      req: { type: "req", id: "request-model", method: "talk.session.create" },
+      params: {
+        mode: "realtime",
+        transport: "gateway-relay",
+        brain: "agent-consult",
+        model: "qwen3.5-omni-flash-realtime",
+        clientCapabilities: ["flowgo.expression.v1"],
+      },
+      client: { connId: "conn-request-model" } as never,
+      isWebchatConnect: () => false,
+      respond: overrideRespond as never,
+      context: {
+        getRuntimeConfig: () =>
+          ({
+            talk: {
+              realtime: {
+                provider: "qwen",
+                providers: {
+                  qwen: {
+                    apiKey: "provider-key",
+                    model: "qwen3-omni-flash-realtime",
+                  },
+                },
+                consultRouting: "provider-direct",
+              },
+            },
+          }) as OpenClawConfig,
+      } as never,
+    });
+
+    expect(supportsToolCallsForModel).toHaveBeenLastCalledWith("qwen3.5-omni-flash-realtime");
+    const overrideRelayInput = mockCallArg(mocks.createTalkRealtimeRelaySession, 1) as Record<
+      string,
+      unknown
+    >;
+    expect(overrideRelayInput.model).toBe("qwen3.5-omni-flash-realtime");
+    expect(overrideRelayInput.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "flowgo_show_expression" })]),
+    );
+    expectRespondOk(overrideRespond, {
+      negotiatedCapabilities: ["flowgo.expression.v1"],
+    });
+  });
+
   it("creates transcription gateway-relay sessions through the unified API", async () => {
     const provider = {
       id: "openai",

@@ -1310,6 +1310,134 @@ describe("talk realtime gateway relay", () => {
     ).toEqual(["turn-1", "turn-2"]);
   });
 
+  it("cancels the active Talk turn when the provider cancels its response", () => {
+    let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
+    const provider: RealtimeVoiceProviderPlugin = {
+      id: "relay-test",
+      label: "Relay Test",
+      isConfigured: () => true,
+      createBridge: (req) => {
+        bridgeRequest = req;
+        return {
+          connect: vi.fn(async () => undefined),
+          sendAudio: vi.fn(),
+          setMediaTimestamp: vi.fn(),
+          handleBargeIn: vi.fn(),
+          submitToolResult: vi.fn(),
+          acknowledgeMark: vi.fn(),
+          close: vi.fn(),
+          isConnected: vi.fn(() => true),
+        };
+      },
+    };
+    const talkEvents: Array<{ type?: string; turnId?: string }> = [];
+    const context = {
+      broadcastToConnIds: (_event: string, payload: { talkEvent?: { type?: string } }) => {
+        if (payload.talkEvent) {
+          talkEvents.push(payload.talkEvent);
+        }
+      },
+    } as never;
+    createTalkRealtimeRelaySession({
+      context,
+      connId: "conn-1",
+      provider,
+      providerConfig: {},
+      instructions: "brief",
+      tools: [],
+    });
+
+    bridgeRequest?.onTranscript?.("user", "first", true);
+    bridgeRequest?.onEvent?.({ direction: "server", type: "response.cancelled" });
+    bridgeRequest?.onTranscript?.("user", "second", true);
+
+    expect(
+      talkEvents.filter((event) => event.type === "turn.cancelled").map((event) => event.turnId),
+    ).toEqual(["turn-1"]);
+    expect(
+      talkEvents.filter((event) => event.type === "turn.started").map((event) => event.turnId),
+    ).toEqual(["turn-1", "turn-2"]);
+  });
+
+  it("settles a late expression result without reopening its cancelled turn", () => {
+    let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
+    const submitToolResult = vi.fn();
+    const provider: RealtimeVoiceProviderPlugin = {
+      id: "relay-test",
+      label: "Relay Test",
+      isConfigured: () => true,
+      createBridge: (req) => {
+        bridgeRequest = req;
+        return {
+          connect: vi.fn(async () => undefined),
+          sendAudio: vi.fn(),
+          setMediaTimestamp: vi.fn(),
+          handleBargeIn: vi.fn(),
+          submitToolResult,
+          acknowledgeMark: vi.fn(),
+          close: vi.fn(),
+          isConnected: vi.fn(() => true),
+        };
+      },
+    };
+    const talkEvents: Array<{ type?: string; turnId?: string; callId?: string }> = [];
+    const context = {
+      broadcastToConnIds: (
+        _event: string,
+        payload: { talkEvent?: { type?: string; turnId?: string; callId?: string } },
+      ) => {
+        if (payload.talkEvent) {
+          talkEvents.push(payload.talkEvent);
+        }
+      },
+    } as never;
+    const session = createTalkRealtimeRelaySession({
+      context,
+      connId: "conn-1",
+      provider,
+      providerConfig: {},
+      instructions: "brief",
+      tools: [],
+    });
+
+    bridgeRequest?.onTranscript?.("user", "first", true);
+    bridgeRequest?.onToolCall?.({
+      itemId: "item-expression",
+      callId: "call-expression",
+      name: "flowgo_show_expression",
+      args: { expression: "happy" },
+    });
+    cancelTalkRealtimeRelayTurn({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-1",
+      reason: "barge-in",
+    });
+    submitTalkRealtimeRelayToolResult({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-1",
+      callId: "call-expression",
+      result: { ok: true },
+    });
+    bridgeRequest?.onTranscript?.("user", "second", true);
+
+    expect(submitToolResult).toHaveBeenCalledOnce();
+    expect(submitToolResult).toHaveBeenCalledWith(
+      "call-expression",
+      { ok: true },
+      { suppressResponse: true },
+    );
+    expect(
+      talkEvents.filter((event) => event.type === "turn.cancelled").map((event) => event.turnId),
+    ).toEqual(["turn-1"]);
+    expect(
+      talkEvents.filter((event) => event.type === "turn.started").map((event) => event.turnId),
+    ).toEqual(["turn-1", "turn-2"]);
+    expect(
+      talkEvents.find((event) => event.type === "tool.result" && event.callId === "call-expression")
+        ?.turnId,
+    ).toBe("turn-1");
+  });
+
   it("aborts linked agent consult runs when the relay turn is cancelled", () => {
     const {
       abortController,

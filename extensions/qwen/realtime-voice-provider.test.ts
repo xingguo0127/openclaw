@@ -46,7 +46,11 @@ describe("Qwen realtime tool contract", () => {
   it("limits realtime tool support to the Qwen 3.5 Omni family", () => {
     expect(supportsQwenRealtimeToolCalls(undefined)).toBe(true);
     expect(supportsQwenRealtimeToolCalls("qwen3.5-omni-flash-realtime")).toBe(true);
+    expect(supportsQwenRealtimeToolCalls("qwen3.5-omni-plus-realtime")).toBe(true);
+    expect(supportsQwenRealtimeToolCalls("qwen3.5-omni-flash-realtime-2026-02-23")).toBe(true);
     expect(supportsQwenRealtimeToolCalls("qwen3-omni-flash-realtime")).toBe(false);
+    expect(supportsQwenRealtimeToolCalls("qwen3.5-omni-flash")).toBe(false);
+    expect(supportsQwenRealtimeToolCalls("qwen3.5-omni-pro-realtime")).toBe(false);
   });
 
   it("continues silent side effects without cancelling or reading their result", () => {
