@@ -822,7 +822,9 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
   }
 
   handleBargeIn(options?: RealtimeVoiceBargeInOptions): void {
-    if (options?.discardPendingResponse === true) {
+    // handleBargeIn 的调用者都代表真实用户打断；内部工具续答的 response.cancel 走独立路径。
+    // 因此默认丢弃旧响应排队的 continuation，避免 VAD speech_started 把它重新刷出来。
+    if (options?.discardPendingResponse !== false) {
       this.responseCreatePending = false;
       this.pendingResponseInstructions = undefined;
       this.continuingToolCallIds.clear();

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildQwenRealtimeVoiceProvider,
   resolveQwenToolResultResponsePolicy,
   supportsQwenRealtimeToolCalls,
   toQwenRealtimeTools,
@@ -65,5 +66,28 @@ describe("Qwen realtime tool contract", () => {
     const consultPolicy = resolveQwenToolResultResponsePolicy(undefined);
     expect(consultPolicy.cancelActive).toBe(true);
     expect(consultPolicy.instructions).toContain("把这个结果");
+  });
+
+  it("drops a queued silent continuation on provider VAD barge-in", () => {
+    const bridge = buildQwenRealtimeVoiceProvider().createBridge({
+      providerConfig: { apiKey: "test-key" },
+      onAudio: () => undefined,
+      onClearAudio: () => undefined,
+      onToolCall: () => undefined,
+    } as never);
+    const state = bridge as unknown as {
+      responseCreatePending: boolean;
+      pendingResponseInstructions?: string;
+      continuingToolCallIds: Set<string>;
+    };
+    state.responseCreatePending = true;
+    state.pendingResponseInstructions = "continue stale expression turn";
+    state.continuingToolCallIds.add("call-expression");
+
+    bridge.handleBargeIn?.({ audioPlaybackActive: true });
+
+    expect(state.responseCreatePending).toBe(false);
+    expect(state.pendingResponseInstructions).toBeUndefined();
+    expect(state.continuingToolCallIds.size).toBe(0);
   });
 });
