@@ -1188,6 +1188,128 @@ describe("talk realtime gateway relay", () => {
     ).toBe(true);
   });
 
+  it("ends normal provider responses and assigns a new id to the next turn", () => {
+    let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
+    const provider: RealtimeVoiceProviderPlugin = {
+      id: "relay-test",
+      label: "Relay Test",
+      isConfigured: () => true,
+      createBridge: (req) => {
+        bridgeRequest = req;
+        return {
+          connect: vi.fn(async () => undefined),
+          sendAudio: vi.fn(),
+          setMediaTimestamp: vi.fn(),
+          handleBargeIn: vi.fn(),
+          submitToolResult: vi.fn(),
+          acknowledgeMark: vi.fn(),
+          close: vi.fn(),
+          isConnected: vi.fn(() => true),
+        };
+      },
+    };
+    const talkEvents: Array<{ type?: string; turnId?: string }> = [];
+    const context = {
+      broadcastToConnIds: (_event: string, payload: { talkEvent?: { type?: string } }) => {
+        if (payload.talkEvent) {
+          talkEvents.push(payload.talkEvent);
+        }
+      },
+    } as never;
+    createTalkRealtimeRelaySession({
+      context,
+      connId: "conn-1",
+      provider,
+      providerConfig: {},
+      instructions: "brief",
+      tools: [],
+    });
+
+    bridgeRequest?.onTranscript?.("user", "first", true);
+    bridgeRequest?.onTranscript?.("assistant", "one", true);
+    bridgeRequest?.onEvent?.({ direction: "server", type: "response.done" });
+    bridgeRequest?.onTranscript?.("user", "second", true);
+    bridgeRequest?.onTranscript?.("assistant", "two", true);
+    bridgeRequest?.onEvent?.({ direction: "server", type: "response.done" });
+
+    expect(
+      talkEvents.filter((event) => event.type === "turn.started").map((event) => event.turnId),
+    ).toEqual(["turn-1", "turn-2"]);
+    expect(
+      talkEvents.filter((event) => event.type === "turn.ended").map((event) => event.turnId),
+    ).toEqual(["turn-1", "turn-2"]);
+  });
+
+  it("keeps a tool turn open through its silent provider continuation", () => {
+    let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
+    const submitToolResult = vi.fn();
+    const provider: RealtimeVoiceProviderPlugin = {
+      id: "relay-test",
+      label: "Relay Test",
+      isConfigured: () => true,
+      createBridge: (req) => {
+        bridgeRequest = req;
+        return {
+          connect: vi.fn(async () => undefined),
+          sendAudio: vi.fn(),
+          setMediaTimestamp: vi.fn(),
+          handleBargeIn: vi.fn(),
+          submitToolResult,
+          acknowledgeMark: vi.fn(),
+          close: vi.fn(),
+          isConnected: vi.fn(() => true),
+        };
+      },
+    };
+    const talkEvents: Array<{ type?: string; turnId?: string }> = [];
+    const context = {
+      broadcastToConnIds: (_event: string, payload: { talkEvent?: { type?: string } }) => {
+        if (payload.talkEvent) {
+          talkEvents.push(payload.talkEvent);
+        }
+      },
+    } as never;
+    const session = createTalkRealtimeRelaySession({
+      context,
+      connId: "conn-1",
+      provider,
+      providerConfig: {},
+      instructions: "brief",
+      tools: [],
+    });
+
+    bridgeRequest?.onTranscript?.("user", "hello", true);
+    bridgeRequest?.onToolCall?.({
+      itemId: "item-expression",
+      callId: "call-expression",
+      name: "flowgo_show_expression",
+      args: { expression: "happy", intensity: 0.7, durationMs: 3000 },
+    });
+    submitTalkRealtimeRelayToolResult({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-1",
+      callId: "call-expression",
+      result: { ok: true },
+    });
+    expect(submitToolResult).toHaveBeenCalledWith(
+      "call-expression",
+      { ok: true },
+      { responseMode: "silent-side-effect" },
+    );
+    bridgeRequest?.onEvent?.({ direction: "server", type: "response.done" });
+    expect(talkEvents.some((event) => event.type === "turn.ended")).toBe(false);
+    bridgeRequest?.onTranscript?.("assistant", "continued reply", true);
+    bridgeRequest?.onEvent?.({ direction: "server", type: "response.done" });
+    bridgeRequest?.onTranscript?.("user", "next", true);
+
+    expect(
+      talkEvents.filter((event) => event.type === "turn.ended").map((event) => event.turnId),
+    ).toEqual(["turn-1"]);
+    expect(
+      talkEvents.filter((event) => event.type === "turn.started").map((event) => event.turnId),
+    ).toEqual(["turn-1", "turn-2"]);
+  });
+
   it("aborts linked agent consult runs when the relay turn is cancelled", () => {
     const {
       abortController,

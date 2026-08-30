@@ -58,6 +58,8 @@ export type RealtimeVoiceToolResultOptions = {
    */
   suppressResponse?: boolean;
   willContinue?: boolean;
+  /** Continue the assistant reply without speaking or summarizing the side-effect result. */
+  responseMode?: "default" | "silent-side-effect";
 };
 
 export type RealtimeVoiceBridgeEvent = {
@@ -89,6 +91,7 @@ export type RealtimeVoiceProviderCapabilities = {
   supportsBrowserSession?: boolean;
   supportsBargeIn?: boolean;
   supportsToolCalls?: boolean;
+  supportsToolCallsForModel?: (model: string | undefined) => boolean;
   supportsVideoFrames?: boolean;
   supportsSessionResumption?: boolean;
 };

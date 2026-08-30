@@ -15,6 +15,7 @@ import {
   type RealtimeVoiceAgentControlResult,
 } from "../talk/agent-run-control.js";
 import { readSpeakableRealtimeVoiceToolResult } from "../talk/consult-question.js";
+import { FLOWGO_EXPRESSION_TOOL_NAME } from "../talk/flowgo-expression-tool.js";
 import {
   createRealtimeVoiceForcedConsultCoordinator,
   type RealtimeVoiceForcedConsultCoordinator,
@@ -116,6 +117,16 @@ type RelaySession = {
   activeAgentRuns: Map<string, string>;
   activeAgentToolCalls: Map<string, string>;
   completedAgentToolCalls: Set<string>;
+  toolCalls: Map<
+    string,
+    {
+      name: string;
+      turnId: string;
+      functionResponseDone: boolean;
+      resultSubmitted: boolean;
+      expectsContinuation: boolean;
+    }
+  >;
   forcedConsults: RealtimeVoiceForcedConsultCoordinator;
   transcript: RealtimeVoiceTranscriptEntry[];
 };
@@ -505,16 +516,24 @@ export function createTalkRealtimeRelaySession(
         event.type === "response.done" ||
         event.type === "response.cancelled"
       ) {
-        emit({
-          relaySessionId,
-          type: "audioDone",
-          ...((event.itemId ?? currentOutputItemId)
-            ? { itemId: event.itemId ?? currentOutputItemId }
-            : {}),
-          ...((event.responseId ?? currentOutputResponseId)
-            ? { responseId: event.responseId ?? currentOutputResponseId }
-            : {}),
-        });
+        const relay = relayRef.current;
+        const talkEvent =
+          event.type === "response.done" && relay
+            ? finishRelayTurnAfterProviderResponse(relay)
+            : undefined;
+        emit(
+          {
+            relaySessionId,
+            type: "audioDone",
+            ...((event.itemId ?? currentOutputItemId)
+              ? { itemId: event.itemId ?? currentOutputItemId }
+              : {}),
+            ...((event.responseId ?? currentOutputResponseId)
+              ? { responseId: event.responseId ?? currentOutputResponseId }
+              : {}),
+          },
+          talkEvent,
+        );
         currentOutputItemId = undefined;
         currentOutputResponseId = undefined;
       }
@@ -585,6 +604,15 @@ export function createTalkRealtimeRelaySession(
     onToolCall: (toolCall) => {
       const relay = relayRef.current;
       const turnId = relay ? ensureRelayTurn(relay) : undefined;
+      if (relay && turnId && !relay.toolCalls.has(toolCall.callId)) {
+        relay.toolCalls.set(toolCall.callId, {
+          name: toolCall.name,
+          turnId,
+          functionResponseDone: false,
+          resultSubmitted: false,
+          expectsContinuation: false,
+        });
+      }
       if (relay && toolCall.name === REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME) {
         const forcedConsult = relay.forcedConsults.recordNativeConsult(
           toolCall.args,
@@ -682,6 +710,7 @@ export function createTalkRealtimeRelaySession(
     activeAgentRuns: new Map(),
     activeAgentToolCalls: new Map(),
     completedAgentToolCalls: new Set(),
+    toolCalls: new Map(),
     forcedConsults: createRealtimeVoiceForcedConsultCoordinator(),
     transcript: [],
   };
@@ -722,6 +751,32 @@ export function createTalkRealtimeRelaySession(
     ...(params.voice ? { voice: params.voice } : {}),
     expiresAt: Math.floor(expiresAtMs / 1000),
   };
+}
+
+function finishRelayTurnAfterProviderResponse(session: RelaySession): TalkEvent | undefined {
+  const activeTurnId = session.talk.activeTurnId;
+  if (!activeTurnId) {
+    return undefined;
+  }
+  const calls = [...session.toolCalls.entries()].filter(([, call]) => call.turnId === activeTurnId);
+  const unseenFunctionResponse = calls.filter(([, call]) => !call.functionResponseDone);
+  for (const [, call] of unseenFunctionResponse) {
+    call.functionResponseDone = true;
+  }
+  if (
+    calls.some(([, call]) => !call.resultSubmitted) ||
+    (unseenFunctionResponse.length > 0 && calls.some(([, call]) => call.expectsContinuation))
+  ) {
+    return undefined;
+  }
+  for (const [callId] of calls) {
+    session.toolCalls.delete(callId);
+  }
+  const ended = session.talk.endTurn({
+    turnId: activeTurnId,
+    payload: { reason: "provider-response-done" },
+  });
+  return ended.ok ? ended.event : undefined;
 }
 
 function scheduleForcedAgentConsult(session: RelaySession | undefined, question: string): void {
@@ -919,10 +974,19 @@ export function submitTalkRealtimeRelayToolResult(params: {
     });
     return;
   }
-  session.bridge.submitToolResult(params.callId, params.result, params.options);
-  const turnId = ensureRelayTurn(session);
+  const toolCall = session.toolCalls.get(params.callId);
+  const providerOptions: RealtimeVoiceToolResultOptions | undefined =
+    toolCall?.name === FLOWGO_EXPRESSION_TOOL_NAME
+      ? { responseMode: "silent-side-effect" }
+      : params.options;
+  session.bridge.submitToolResult(params.callId, params.result, providerOptions);
+  const turnId = toolCall?.turnId ?? ensureRelayTurn(session);
   const final = params.options?.willContinue !== true;
   if (final) {
+    if (toolCall) {
+      toolCall.resultSubmitted = true;
+      toolCall.expectsContinuation = providerOptions?.suppressResponse !== true;
+    }
     const runId = session.activeAgentToolCalls.get(params.callId);
     if (runId) {
       session.activeAgentRuns.delete(runId);

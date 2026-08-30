@@ -987,12 +987,16 @@ describe("talk.session unified handlers", () => {
     });
   });
 
-  it("does not negotiate FlowGo expressions when the provider cannot call tools", async () => {
+  it("does not negotiate FlowGo expressions when the resolved model cannot call tools", async () => {
     const provider = {
       id: "no-tools",
       label: "Realtime without tools",
       isConfigured: () => true,
-      capabilities: { supportsToolCalls: false },
+      capabilities: {
+        supportsToolCalls: true,
+        supportsToolCallsForModel: (model: string | undefined) =>
+          model !== "qwen3-omni-flash-realtime",
+      },
       createBridge: vi.fn(),
     };
     mocks.resolveConfiguredRealtimeVoiceProvider.mockReturnValue({
@@ -1018,6 +1022,7 @@ describe("talk.session unified handlers", () => {
         mode: "realtime",
         transport: "gateway-relay",
         brain: "agent-consult",
+        model: "qwen3-omni-flash-realtime",
         clientCapabilities: ["flowgo.expression.v1"],
       },
       client: { connId: "conn-no-tools" } as never,

@@ -15,6 +15,7 @@ import type {
   RealtimeVoiceBridgeCreateRequest,
   RealtimeVoiceProviderConfig,
   RealtimeVoiceProviderPlugin,
+  RealtimeVoiceTool,
   RealtimeVoiceToolResultOptions,
 } from "openclaw/plugin-sdk/realtime-voice";
 import { REALTIME_VOICE_AUDIO_FORMAT_PCM16_24KHZ } from "openclaw/plugin-sdk/realtime-voice";
@@ -69,6 +70,42 @@ const QWEN_REALTIME_API_KEY_REQUIRED = "Qwen realtime voice requires a DashScope
 // 搅乱、qwen 顺着最新上下文乱答或重复垫话。
 const DELIVER_TOOL_RESULT_INSTRUCTIONS =
   "OpenClaw 刚刚返回了工具结果。请把这个结果自然地用中文口语读给用户;不要再说“请稍等/正在安排”之类的等待垫话,也不要顺着其它话题另起回答,直接讲结果内容。";
+const CONTINUE_AFTER_SILENT_SIDE_EFFECT_INSTRUCTIONS =
+  "继续自然完成当前对用户的语音回复。不要提及刚才的工具、工具参数、工具结果、表情或内部执行状态。";
+
+export function supportsQwenRealtimeToolCalls(model: string | undefined): boolean {
+  return (model ?? QWEN_REALTIME_DEFAULT_MODEL).startsWith("qwen3.5-omni-");
+}
+
+export function toQwenRealtimeTools(tools: RealtimeVoiceTool[]): Array<{
+  type: "function";
+  function: Omit<RealtimeVoiceTool, "type">;
+}> {
+  return tools.map(({ type: _type, ...tool }) => ({
+    type: "function",
+    function: tool,
+  }));
+}
+
+export function resolveQwenToolResultResponsePolicy(
+  options: RealtimeVoiceToolResultOptions | undefined,
+): { respond: boolean; cancelActive: boolean; instructions?: string } {
+  if (options?.willContinue === true || options?.suppressResponse === true) {
+    return { respond: false, cancelActive: false };
+  }
+  if (options?.responseMode === "silent-side-effect") {
+    return {
+      respond: true,
+      cancelActive: false,
+      instructions: CONTINUE_AFTER_SILENT_SIDE_EFFECT_INSTRUCTIONS,
+    };
+  }
+  return {
+    respond: true,
+    cancelActive: true,
+    instructions: DELIVER_TOOL_RESULT_INSTRUCTIONS,
+  };
+}
 
 type RealtimeEvent = {
   type: string;
@@ -282,21 +319,22 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
         output: resultStr,
       },
     });
+    const responsePolicy = resolveQwenToolResultResponsePolicy(options);
     if (options?.willContinue === true) {
       this.continuingToolCallIds.add(callId);
       return;
     }
     this.continuingToolCallIds.delete(callId);
-    if (options?.suppressResponse === true) {
+    if (!responsePolicy.respond) {
       return;
     }
     // 异步结果回来时,若期间被插话搅乱、qwen 正忙别的响应 → 先取消,让"读结果"这轮接管。
-    if (this.responseActive && !this.responseCancelInFlight) {
+    if (responsePolicy.cancelActive && this.responseActive && !this.responseCancelInFlight) {
       this.sendEvent({ type: "response.cancel" }, "reason=deliver-tool-result");
       this.responseCancelInFlight = true;
     }
     // 强制本轮读结果:带本次响应专属 instructions,钉死在"读工具结果"、不许再垫话/顺着最新上下文乱答。
-    this.requestResponseCreate(DELIVER_TOOL_RESULT_INSTRUCTIONS);
+    this.requestResponseCreate(responsePolicy.instructions);
   }
 
   acknowledgeMark(): void {
@@ -608,7 +646,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
         input_audio_transcription: { model: QWEN_REALTIME_INPUT_TRANSCRIPTION_MODEL },
         turn_detection: this.buildTurnDetection(),
         temperature: cfg.temperature ?? 0.8,
-        ...(cfg.tools && cfg.tools.length > 0 ? { tools: cfg.tools, tool_choice: "auto" } : {}),
+        ...(cfg.tools && cfg.tools.length > 0 ? { tools: toQwenRealtimeTools(cfg.tools) } : {}),
       },
     });
   }
@@ -970,6 +1008,7 @@ export function buildQwenRealtimeVoiceProvider(): RealtimeVoiceProviderPlugin {
       outputAudioFormats: [REALTIME_VOICE_AUDIO_FORMAT_PCM16_24KHZ],
       supportsBargeIn: true,
       supportsToolCalls: true,
+      supportsToolCallsForModel: supportsQwenRealtimeToolCalls,
     },
     resolveConfig: ({ rawConfig }) => normalizeProviderConfig(rawConfig),
     isConfigured: ({ providerConfig }) =>

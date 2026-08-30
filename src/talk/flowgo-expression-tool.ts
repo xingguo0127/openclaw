@@ -1,10 +1,11 @@
 import type { RealtimeVoiceTool } from "./provider-types.js";
 
 export const FLOWGO_EXPRESSION_CAPABILITY = "flowgo.expression.v1";
+export const FLOWGO_EXPRESSION_TOOL_NAME = "flowgo_show_expression";
 
 export const FLOWGO_EXPRESSION_TOOL: RealtimeVoiceTool = {
   type: "function",
-  name: "flowgo_show_expression",
+  name: FLOWGO_EXPRESSION_TOOL_NAME,
   description:
     "Show one short-lived high-level emotion on the paired FlowGo device while continuing the spoken reply. " +
     "Call at most once per assistant turn, and do not mention the tool or its result aloud.",

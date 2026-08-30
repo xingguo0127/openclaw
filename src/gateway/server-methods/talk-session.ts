@@ -348,7 +348,10 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           defaults: realtimeConfig,
         });
         const forceAgentConsult = realtimeConfig.consultRouting === "force-agent-consult";
-        const supportsToolCalls = resolution.provider.capabilities?.supportsToolCalls === true;
+        const capabilities = resolution.provider.capabilities;
+        const supportsToolCalls =
+          capabilities?.supportsToolCalls === true &&
+          (capabilities.supportsToolCallsForModel?.(launchOptions.model) ?? true);
         const requestedCapabilities = new Set(params.clientCapabilities ?? []);
         const flowgoExpressionEnabled =
           !forceAgentConsult &&
