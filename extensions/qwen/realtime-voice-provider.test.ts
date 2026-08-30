@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildQwenRealtimeVoiceProvider,
   resolveQwenToolResultResponsePolicy,
@@ -69,25 +69,46 @@ describe("Qwen realtime tool contract", () => {
   });
 
   it("drops a queued silent continuation on provider VAD barge-in", () => {
+    const onAudio = vi.fn();
+    const onEvent = vi.fn();
     const bridge = buildQwenRealtimeVoiceProvider().createBridge({
       providerConfig: { apiKey: "test-key" },
-      onAudio: () => undefined,
+      onAudio,
       onClearAudio: () => undefined,
       onToolCall: () => undefined,
+      onEvent,
     } as never);
     const state = bridge as unknown as {
       responseCreatePending: boolean;
+      responseCreateInFlight: boolean;
+      discardResponseAfterCreate: boolean;
       pendingResponseInstructions?: string;
       continuingToolCallIds: Set<string>;
+      sendEvent: ReturnType<typeof vi.fn>;
+      handleEvent: (event: { type: string; delta?: string; response?: { id: string } }) => void;
     };
     state.responseCreatePending = true;
+    state.responseCreateInFlight = true;
     state.pendingResponseInstructions = "continue stale expression turn";
     state.continuingToolCallIds.add("call-expression");
+    state.sendEvent = vi.fn();
 
     bridge.handleBargeIn?.({ audioPlaybackActive: true });
 
     expect(state.responseCreatePending).toBe(false);
     expect(state.pendingResponseInstructions).toBeUndefined();
     expect(state.continuingToolCallIds.size).toBe(0);
+    expect(state.discardResponseAfterCreate).toBe(true);
+
+    state.handleEvent({ type: "response.created", response: { id: "stale-response" } });
+    expect(state.sendEvent).toHaveBeenCalledWith(
+      { type: "response.cancel" },
+      "reason=discard-barge-in-response",
+    );
+    state.handleEvent({ type: "response.audio.delta", delta: "AAAA" });
+    expect(onAudio).not.toHaveBeenCalled();
+    state.handleEvent({ type: "response.cancelled" });
+    expect(state.discardResponseAfterCreate).toBe(false);
+    expect(onEvent).not.toHaveBeenCalled();
   });
 });

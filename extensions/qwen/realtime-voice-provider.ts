@@ -244,6 +244,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
   private responseCreateInFlight = false;
   private responseCancelInFlight = false;
   private responseCreatePending = false;
+  private discardResponseAfterCreate = false;
   // 本次 response.create 专属 instructions(投递工具结果时用,强制 qwen 读结果而非顺着最新上下文乱答);
   // 沿 pending 链保留,flush 时仍生效。
   private pendingResponseInstructions: string | undefined;
@@ -654,6 +655,31 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
   }
 
   private handleEvent(event: RealtimeEvent): void {
+    if (this.discardResponseAfterCreate) {
+      if (event.type === "response.created") {
+        this.responseActive = true;
+        this.responseCreateInFlight = false;
+        if (!this.responseCancelInFlight) {
+          this.sendEvent({ type: "response.cancel" }, "reason=discard-barge-in-response");
+          this.responseCancelInFlight = true;
+        }
+        return;
+      }
+      if (event.type === "response.cancelled" || event.type === "response.done") {
+        this.responseActive = false;
+        this.responseCreateInFlight = false;
+        this.responseCancelInFlight = false;
+        this.discardResponseAfterCreate = false;
+        this.flushPendingResponseCreate();
+        return;
+      }
+      if (
+        event.type.startsWith("response.") ||
+        event.type.startsWith("conversation.output_audio.")
+      ) {
+        return;
+      }
+    }
     this.config.onEvent?.({
       direction: "server",
       type: event.type,
@@ -750,6 +776,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
         this.responseActive = false;
         this.responseCreateInFlight = false;
         this.responseCancelInFlight = false;
+        this.discardResponseAfterCreate = false;
         this.flushPendingResponseCreate();
         return;
 
@@ -828,6 +855,9 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
       this.responseCreatePending = false;
       this.pendingResponseInstructions = undefined;
       this.continuingToolCallIds.clear();
+      if (this.responseCreateInFlight) {
+        this.discardResponseAfterCreate = true;
+      }
     }
     const assistantItemId = this.lastAssistantItemId;
     const responseStartTimestamp = this.responseStartTimestamp;
@@ -949,6 +979,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
     this.responseCreateInFlight = false;
     this.responseCancelInFlight = false;
     this.responseCreatePending = false;
+    this.discardResponseAfterCreate = false;
     this.continuingToolCallIds.clear();
     this.lastAssistantItemId = null;
     this.toolCallBuffers.clear();

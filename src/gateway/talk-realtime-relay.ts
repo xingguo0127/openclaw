@@ -504,7 +504,11 @@ export function createTalkRealtimeRelaySession(
     onEvent: (event) => {
       const relay = relayRef.current;
       if (event.direction === "client") {
-        if (event.type === "response.cancel" && relay?.talk.activeTurnId) {
+        if (
+          event.type === "response.cancel" &&
+          event.detail?.includes("reason=discard-barge-in-response") !== true &&
+          relay?.talk.activeTurnId
+        ) {
           relay.providerCancelRequests.push({
             turnId: relay.talk.activeTurnId,
             toolContinuation: event.detail?.includes("reason=deliver-tool-result") === true,
