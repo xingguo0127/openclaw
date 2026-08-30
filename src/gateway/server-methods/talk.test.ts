@@ -569,6 +569,7 @@ describe("talk.session unified handlers", () => {
       defaultModel: "gpt-realtime-default",
       models: ["gpt-realtime-default", "gpt-realtime"],
       isConfigured: () => true,
+      capabilities: { supportsToolCalls: true },
       createBridge: vi.fn(),
     };
     mocks.listRealtimeVoiceProviders.mockReturnValue([provider] as never);
@@ -601,6 +602,7 @@ describe("talk.session unified handlers", () => {
         provider: "openai",
         model: "gpt-realtime",
         voice: "alloy",
+        clientCapabilities: ["flowgo.expression.v1"],
       },
       client: { connId: "conn-1" } as never,
       isWebchatConnect: () => false,
@@ -644,6 +646,7 @@ describe("talk.session unified handlers", () => {
       "Additional realtime instructions:\nSpeak warmly.",
     );
     expect(relayCreateInput.forceAgentConsultOnFinalTranscript).toBe(true);
+    expect(relayCreateInput.tools).toEqual([]);
     expect(relayCreateInput.instructions).toContain("openclaw_agent_consult");
     expect(relayCreateInput.instructions).toContain("好的,我看一下");
     expectRespondOk(createRespond, {
@@ -652,6 +655,7 @@ describe("talk.session unified handlers", () => {
       mode: "realtime",
       transport: "gateway-relay",
       brain: "agent-consult",
+      negotiatedCapabilities: [],
     });
 
     const inputRespond = vi.fn();
@@ -914,6 +918,131 @@ describe("talk.session unified handlers", () => {
       message: "Error: OpenAI API key rejected with 401",
       phase: "request",
     });
+  });
+
+  it("negotiates the fixed FlowGo expression tool only for capable realtime clients", async () => {
+    const provider = {
+      id: "openai",
+      label: "OpenAI Realtime",
+      isConfigured: () => true,
+      capabilities: { supportsToolCalls: true },
+      createBridge: vi.fn(),
+    };
+    mocks.resolveConfiguredRealtimeVoiceProvider.mockReturnValue({
+      provider,
+      providerConfig: { apiKey: "openai-key" },
+    });
+    mocks.createTalkRealtimeRelaySession.mockReturnValue({
+      provider: "openai",
+      transport: "gateway-relay",
+      relaySessionId: "relay-flowgo-1",
+      audio: {
+        inputEncoding: "pcm16",
+        inputSampleRateHz: 24000,
+        outputEncoding: "pcm16",
+        outputSampleRateHz: 24000,
+      },
+    });
+
+    const respond = vi.fn();
+    await talkHandlers["talk.session.create"]({
+      req: { type: "req", id: "flowgo", method: "talk.session.create" },
+      params: {
+        mode: "realtime",
+        transport: "gateway-relay",
+        brain: "agent-consult",
+        clientCapabilities: ["unknown.v1", "flowgo.expression.v1"],
+      },
+      client: { connId: "conn-flowgo" } as never,
+      isWebchatConnect: () => false,
+      respond: respond as never,
+      context: {
+        getRuntimeConfig: () =>
+          ({
+            talk: {
+              realtime: {
+                provider: "openai",
+                providers: { openai: { apiKey: "openai-key" } },
+                consultRouting: "provider-direct",
+              },
+            },
+          }) as OpenClawConfig,
+      } as never,
+    });
+
+    const relayInput = mockCallArg(mocks.createTalkRealtimeRelaySession) as Record<string, unknown>;
+    expect(relayInput.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "openclaw_agent_consult" }),
+        expect.objectContaining({ name: "openclaw_agent_control" }),
+        expect.objectContaining({
+          name: "flowgo_show_expression",
+          parameters: expect.objectContaining({ additionalProperties: false }),
+        }),
+      ]),
+    );
+    expectRespondOk(respond, {
+      sessionId: "relay-flowgo-1",
+      negotiatedCapabilities: ["flowgo.expression.v1"],
+    });
+  });
+
+  it("does not negotiate FlowGo expressions when the provider cannot call tools", async () => {
+    const provider = {
+      id: "no-tools",
+      label: "Realtime without tools",
+      isConfigured: () => true,
+      capabilities: { supportsToolCalls: false },
+      createBridge: vi.fn(),
+    };
+    mocks.resolveConfiguredRealtimeVoiceProvider.mockReturnValue({
+      provider,
+      providerConfig: { apiKey: "provider-key" },
+    });
+    mocks.createTalkRealtimeRelaySession.mockReturnValue({
+      provider: "no-tools",
+      transport: "gateway-relay",
+      relaySessionId: "relay-no-tools-1",
+      audio: {
+        inputEncoding: "pcm16",
+        inputSampleRateHz: 24000,
+        outputEncoding: "pcm16",
+        outputSampleRateHz: 24000,
+      },
+    });
+
+    const respond = vi.fn();
+    await talkHandlers["talk.session.create"]({
+      req: { type: "req", id: "no-tools", method: "talk.session.create" },
+      params: {
+        mode: "realtime",
+        transport: "gateway-relay",
+        brain: "agent-consult",
+        clientCapabilities: ["flowgo.expression.v1"],
+      },
+      client: { connId: "conn-no-tools" } as never,
+      isWebchatConnect: () => false,
+      respond: respond as never,
+      context: {
+        getRuntimeConfig: () =>
+          ({
+            talk: {
+              realtime: {
+                provider: "no-tools",
+                providers: { "no-tools": { apiKey: "provider-key" } },
+                consultRouting: "provider-direct",
+              },
+            },
+          }) as OpenClawConfig,
+      } as never,
+    });
+
+    const relayInput = mockCallArg(mocks.createTalkRealtimeRelaySession) as Record<string, unknown>;
+    expect(relayInput.tools).toEqual([
+      expect.objectContaining({ name: "openclaw_agent_consult" }),
+      expect.objectContaining({ name: "openclaw_agent_control" }),
+    ]);
+    expectRespondOk(respond, { negotiatedCapabilities: [] });
   });
 
   it("creates transcription gateway-relay sessions through the unified API", async () => {

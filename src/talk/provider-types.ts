@@ -38,6 +38,7 @@ export type RealtimeVoiceTool = {
   description: string;
   parameters: {
     type: "object";
+    additionalProperties?: false;
     properties: Record<string, unknown>;
     required?: string[];
   };

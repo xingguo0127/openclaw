@@ -275,6 +275,12 @@ export const TalkSessionJoinParamsSchema = Type.Object(
 );
 
 /** Creates a gateway-managed Talk session for realtime, transcription, or relay use. */
+const TalkCapabilitySchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: "^[a-z0-9][a-z0-9._-]*$",
+});
+
 export const TalkSessionCreateParamsSchema = Type.Object(
   {
     sessionKey: Type.Optional(Type.String()),
@@ -290,6 +296,12 @@ export const TalkSessionCreateParamsSchema = Type.Object(
     transport: Type.Optional(TalkTransportSchema),
     brain: Type.Optional(TalkBrainSchema),
     ttlMs: Type.Optional(Type.Integer({ minimum: 1000, maximum: 3600000 })),
+    clientCapabilities: Type.Optional(
+      Type.Array(TalkCapabilitySchema, {
+        maxItems: 16,
+        uniqueItems: true,
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -503,6 +515,9 @@ export const TalkSessionCreateResultSchema = Type.Object(
     model: Type.Optional(Type.String()),
     voice: Type.Optional(Type.String()),
     expiresAt: Type.Optional(Type.Number()),
+    negotiatedCapabilities: Type.Optional(
+      Type.Array(TalkCapabilitySchema, { maxItems: 16, uniqueItems: true }),
+    ),
   },
   { additionalProperties: false },
 );

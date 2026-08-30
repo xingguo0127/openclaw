@@ -20,6 +20,10 @@ import {
 import { REALTIME_VOICE_AGENT_CONSULT_TOOL } from "../../talk/agent-consult-tool.js";
 import { REALTIME_VOICE_AGENT_CONTROL_TOOL } from "../../talk/agent-run-control-shared.js";
 import { controlRealtimeVoiceAgentRun } from "../../talk/agent-run-control.js";
+import {
+  FLOWGO_EXPRESSION_CAPABILITY,
+  FLOWGO_EXPRESSION_TOOL,
+} from "../../talk/flowgo-expression-tool.js";
 import { resolveConfiguredRealtimeVoiceProvider } from "../../talk/provider-resolver.js";
 import type { TalkBrain, TalkMode, TalkTransport } from "../../talk/talk-events.js";
 import { resolveFlowGoNewSessionRoute } from "../flowgo-device-routing.js";
@@ -343,6 +347,23 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           requested: params,
           defaults: realtimeConfig,
         });
+        const forceAgentConsult = realtimeConfig.consultRouting === "force-agent-consult";
+        const supportsToolCalls = resolution.provider.capabilities?.supportsToolCalls === true;
+        const requestedCapabilities = new Set(params.clientCapabilities ?? []);
+        const flowgoExpressionEnabled =
+          !forceAgentConsult &&
+          supportsToolCalls &&
+          requestedCapabilities.has(FLOWGO_EXPRESSION_CAPABILITY);
+        const negotiatedCapabilities = flowgoExpressionEnabled
+          ? [FLOWGO_EXPRESSION_CAPABILITY]
+          : [];
+        const tools = forceAgentConsult
+          ? []
+          : [
+              REALTIME_VOICE_AGENT_CONSULT_TOOL,
+              REALTIME_VOICE_AGENT_CONTROL_TOOL,
+              ...(flowgoExpressionEnabled ? [FLOWGO_EXPRESSION_TOOL] : []),
+            ];
         const session = createTalkRealtimeRelaySession({
           context,
           connId,
@@ -354,15 +375,11 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           //   ①调 consult → 与强制转交双重进 DeepSeek(文本去重按串匹配,改写 vs 原话 → 去重失效);
           //   ②调 control → app 侧把 control 重路由成 consult,同样双重。
           // 故 force 时**不给任何工具**,qwen 只管念强制转交回来的结果;停/改这类由 DeepSeek 逐轮处理。
-          tools:
-            realtimeConfig.consultRouting === "force-agent-consult"
-              ? []
-              : [REALTIME_VOICE_AGENT_CONSULT_TOOL, REALTIME_VOICE_AGENT_CONTROL_TOOL],
+          tools,
           model: launchOptions.model,
           sessionKey: routedSessionKey,
           voice: launchOptions.voice,
-          forceAgentConsultOnFinalTranscript:
-            realtimeConfig.consultRouting === "force-agent-consult",
+          forceAgentConsultOnFinalTranscript: forceAgentConsult,
         });
         rememberUnifiedTalkSession(session.relaySessionId, {
           kind: "realtime-relay",
@@ -375,6 +392,7 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           ...(routedSessionKey ? { sessionKey: routedSessionKey } : {}),
           mode,
           brain,
+          negotiatedCapabilities,
         });
         return;
       }
