@@ -569,7 +569,10 @@ describe("talk.session unified handlers", () => {
       defaultModel: "gpt-realtime-default",
       models: ["gpt-realtime-default", "gpt-realtime"],
       isConfigured: () => true,
-      capabilities: { supportsToolCalls: true },
+      capabilities: {
+        supportsToolCalls: true,
+        supportsResponseToolCallCorrelation: true,
+      },
       createBridge: vi.fn(),
     };
     mocks.listRealtimeVoiceProviders.mockReturnValue([provider] as never);
@@ -677,7 +680,7 @@ describe("talk.session unified handlers", () => {
     const cancelRespond = vi.fn();
     await talkHandlers["talk.session.cancelOutput"]({
       req: { type: "req", id: "3", method: "talk.session.cancelOutput" },
-      params: { sessionId: "relay-unified-1", reason: "barge-in" },
+      params: { sessionId: "relay-unified-1", turnId: "turn-output", reason: "barge-in" },
       client: { connId: "conn-1" } as never,
       isWebchatConnect: () => false,
       respond: cancelRespond as never,
@@ -686,8 +689,26 @@ describe("talk.session unified handlers", () => {
     expect(mocks.cancelTalkRealtimeRelayTurn).toHaveBeenCalledWith({
       relaySessionId: "relay-unified-1",
       connId: "conn-1",
+      turnId: "turn-output",
       reason: "barge-in",
     });
+
+    const cancelTurnRespond = vi.fn();
+    await talkHandlers["talk.session.cancelTurn"]({
+      req: { type: "req", id: "3b", method: "talk.session.cancelTurn" },
+      params: { sessionId: "relay-unified-1", turnId: "turn-active", reason: "client-cancel" },
+      client: { connId: "conn-1" } as never,
+      isWebchatConnect: () => false,
+      respond: cancelTurnRespond as never,
+      context: {} as never,
+    });
+    expect(mocks.cancelTalkRealtimeRelayTurn).toHaveBeenCalledWith({
+      relaySessionId: "relay-unified-1",
+      connId: "conn-1",
+      turnId: "turn-active",
+      reason: "client-cancel",
+    });
+    expectRespondOk(cancelTurnRespond);
 
     const toolRespond = vi.fn();
     await talkHandlers["talk.session.submitToolResult"]({
@@ -925,7 +946,10 @@ describe("talk.session unified handlers", () => {
       id: "openai",
       label: "OpenAI Realtime",
       isConfigured: () => true,
-      capabilities: { supportsToolCalls: true },
+      capabilities: {
+        supportsToolCalls: true,
+        supportsResponseToolCallCorrelation: true,
+      },
       createBridge: vi.fn(),
     };
     mocks.resolveConfiguredRealtimeVoiceProvider.mockReturnValue({
@@ -998,6 +1022,7 @@ describe("talk.session unified handlers", () => {
         supportsToolCalls: true,
         supportsToolCallsForModel: (model: string | undefined) =>
           model !== "qwen3-omni-flash-realtime",
+        supportsResponseToolCallCorrelation: true,
       },
       createBridge: vi.fn(),
     };
@@ -1064,6 +1089,7 @@ describe("talk.session unified handlers", () => {
       capabilities: {
         supportsToolCalls: true,
         supportsToolCallsForModel,
+        supportsResponseToolCallCorrelation: true,
       },
       createBridge: vi.fn(),
     };

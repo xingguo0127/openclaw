@@ -1392,6 +1392,117 @@ describe("talk realtime gateway relay", () => {
     ).toEqual(["turn-1", "turn-2", "turn-3", "turn-4"]);
   });
 
+  it("fails closed for stale explicit cancellation and late tools from a cancelled response", () => {
+    let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
+    const handleBargeIn = vi.fn();
+    const submitToolResult = vi.fn();
+    const provider: RealtimeVoiceProviderPlugin = {
+      id: "relay-test",
+      label: "Relay Test",
+      isConfigured: () => true,
+      createBridge: (req) => {
+        bridgeRequest = req;
+        return {
+          connect: vi.fn(async () => undefined),
+          sendAudio: vi.fn(),
+          setMediaTimestamp: vi.fn(),
+          handleBargeIn,
+          submitToolResult,
+          acknowledgeMark: vi.fn(),
+          close: vi.fn(),
+          isConnected: vi.fn(() => true),
+        };
+      },
+    };
+    const payloads: Array<{ type?: string; talkEvent?: { type?: string; turnId?: string } }> = [];
+    const context = {
+      broadcastToConnIds: (_event: string, payload: (typeof payloads)[number]) => {
+        payloads.push(payload);
+      },
+    } as never;
+    const session = createTalkRealtimeRelaySession({
+      context,
+      connId: "conn-1",
+      provider,
+      providerConfig: {},
+      instructions: "brief",
+      tools: [],
+    });
+
+    bridgeRequest?.onTranscript?.("user", "first", true);
+    bridgeRequest?.onEvent?.({
+      direction: "server",
+      type: "response.audio.delta",
+      responseId: "response-1",
+    });
+    cancelTalkRealtimeRelayTurn({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-1",
+      turnId: "turn-1",
+      reason: "barge-in",
+    });
+
+    bridgeRequest?.onToolCall?.({
+      itemId: "late-item-before-next-turn",
+      callId: "late-call-before-next-turn",
+      name: "flowgo_show_expression",
+      args: { expression: "happy" },
+      responseId: "response-1",
+    });
+    bridgeRequest?.onTranscript?.("user", "second", true);
+
+    expect(() =>
+      cancelTalkRealtimeRelayTurn({
+        relaySessionId: session.relaySessionId,
+        connId: "conn-1",
+        turnId: "turn-1",
+        reason: "late-client-cancel",
+      }),
+    ).toThrow("Realtime relay cancellation turn does not match the active turn");
+    expect(handleBargeIn).toHaveBeenCalledTimes(1);
+
+    bridgeRequest?.onToolCall?.({
+      itemId: "late-item-after-next-turn",
+      callId: "late-call-after-next-turn",
+      name: "flowgo_show_expression",
+      args: { expression: "sad" },
+      responseId: "response-1",
+    });
+    bridgeRequest?.onEvent?.({
+      direction: "server",
+      type: "response.cancelled",
+      responseId: "response-1",
+    });
+    bridgeRequest?.onToolCall?.({
+      itemId: "late-item-after-terminal",
+      callId: "late-call-after-terminal",
+      name: "flowgo_show_expression",
+      args: { expression: "angry" },
+      responseId: "response-1",
+    });
+
+    expect(submitToolResult).toHaveBeenCalledTimes(3);
+    for (const callId of [
+      "late-call-before-next-turn",
+      "late-call-after-next-turn",
+      "late-call-after-terminal",
+    ]) {
+      expect(submitToolResult).toHaveBeenCalledWith(
+        callId,
+        { ok: false, errorCode: "TURN_CANCELLED" },
+        { suppressResponse: true },
+      );
+    }
+    expect(
+      payloads.filter((payload) => payload.type === "toolCall").map((payload) => payload.type),
+    ).toEqual([]);
+    expect(
+      payloads
+        .filter((payload) => payload.talkEvent?.type === "turn.started")
+        .map((payload) => payload.talkEvent?.turnId),
+    ).toEqual(["turn-1", "turn-2"]);
+  });
+
   it("settles a late expression result without reopening its cancelled turn", () => {
     let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
     const submitToolResult = vi.fn();

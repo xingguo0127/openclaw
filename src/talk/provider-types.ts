@@ -49,6 +49,7 @@ export type RealtimeVoiceToolCallEvent = {
   callId: string;
   name: string;
   args: unknown;
+  responseId?: string;
 };
 
 export type RealtimeVoiceToolResultOptions = {
@@ -92,6 +93,8 @@ export type RealtimeVoiceProviderCapabilities = {
   supportsBargeIn?: boolean;
   supportsToolCalls?: boolean;
   supportsToolCallsForModel?: (model: string | undefined) => boolean;
+  /** Provider tool events carry the response identity needed for stale-turn rejection. */
+  supportsResponseToolCallCorrelation?: boolean;
   supportsVideoFrames?: boolean;
   supportsSessionResumption?: boolean;
 };

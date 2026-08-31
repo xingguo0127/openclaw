@@ -362,6 +362,7 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
         const flowgoExpressionEnabled =
           !forceAgentConsult &&
           supportsToolCalls &&
+          capabilities?.supportsResponseToolCallCorrelation === true &&
           requestedCapabilities.has(FLOWGO_EXPRESSION_CAPABILITY);
         const negotiatedCapabilities = flowgoExpressionEnabled
           ? [FLOWGO_EXPRESSION_CAPABILITY]
@@ -597,9 +598,11 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
       const session = getUnifiedTalkSession(params.sessionId);
       if (session.kind === "realtime-relay") {
         const connId = requireUnifiedTalkSessionConn(session, client?.connId);
+        const turnId = normalizeOptionalString(params.turnId);
         cancelTalkRealtimeRelayTurn({
           relaySessionId: session.relaySessionId,
           connId,
+          ...(turnId ? { turnId } : {}),
           reason: normalizeOptionalString(params.reason),
         });
         respondOk(respond);
@@ -651,9 +654,11 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
         return;
       }
       const connId = requireUnifiedTalkSessionConn(session, client?.connId);
+      const turnId = normalizeOptionalString(params.turnId);
       cancelTalkRealtimeRelayTurn({
         relaySessionId: session.relaySessionId,
         connId,
+        ...(turnId ? { turnId } : {}),
         reason: normalizeOptionalString(params.reason) ?? "output-cancelled",
       });
       respondOk(respond);

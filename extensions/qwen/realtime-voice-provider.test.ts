@@ -68,6 +68,49 @@ describe("Qwen realtime tool contract", () => {
     expect(consultPolicy.instructions).toContain("把这个结果");
   });
 
+  it("preserves response identity on provider tool calls", () => {
+    const onToolCall = vi.fn();
+    const bridge = buildQwenRealtimeVoiceProvider().createBridge({
+      providerConfig: { apiKey: "test-key" },
+      onAudio: () => undefined,
+      onClearAudio: () => undefined,
+      onToolCall,
+    } as never);
+    const state = bridge as unknown as {
+      handleEvent: (event: Record<string, unknown>) => void;
+    };
+
+    state.handleEvent({
+      type: "response.function_call_arguments.delta",
+      response_id: "response-1",
+      item_id: "item-1",
+      call_id: "call-1",
+      name: "flowgo_show_expression",
+      delta: '{"expression":"happy",',
+    });
+    state.handleEvent({
+      type: "response.function_call_arguments.delta",
+      response_id: "response-1",
+      item_id: "item-1",
+      delta: '"intensity":0.8,"durationMs":1200}',
+    });
+    state.handleEvent({
+      type: "response.function_call_arguments.done",
+      response_id: "response-1",
+      item_id: "item-1",
+      call_id: "call-1",
+      name: "flowgo_show_expression",
+    });
+
+    expect(onToolCall).toHaveBeenCalledWith({
+      itemId: "item-1",
+      callId: "call-1",
+      name: "flowgo_show_expression",
+      args: { expression: "happy", intensity: 0.8, durationMs: 1200 },
+      responseId: "response-1",
+    });
+  });
+
   it("drops a queued silent continuation on provider VAD barge-in", () => {
     const onAudio = vi.fn();
     const onEvent = vi.fn();

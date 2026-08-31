@@ -252,7 +252,10 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
   private latestMediaTimestamp = 0;
   private lastAssistantItemId: string | null = null;
   private connectionUrl = "";
-  private toolCallBuffers = new Map<string, { name: string; callId: string; args: string }>();
+  private toolCallBuffers = new Map<
+    string,
+    { name: string; callId: string; args: string; responseId?: string }
+  >();
   private deliveredToolCallKeys = new Set<string>();
   private readonly flowId = randomUUID();
   private sessionReadyFired = false;
@@ -798,6 +801,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
             name: event.name ?? "",
             callId: event.call_id ?? "",
             args: event.delta ?? "",
+            responseId: event.response_id ?? event.response?.id,
           });
         }
         return;
@@ -811,6 +815,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
           callId: buffered?.callId || event.call_id,
           name: buffered?.name || event.name,
           rawArgs: buffered?.args || event.arguments,
+          responseId: buffered?.responseId ?? event.response_id ?? event.response?.id,
         });
         this.toolCallBuffers.delete(key);
         return;
@@ -825,6 +830,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
           callId: event.item.call_id ?? event.call_id ?? event.item.id ?? event.item_id,
           name: event.item.name ?? event.name,
           rawArgs: event.item.arguments ?? event.arguments,
+          responseId: event.response_id ?? event.response?.id,
         });
         return;
       }
@@ -926,6 +932,7 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
     callId?: string;
     name?: string;
     rawArgs?: string;
+    responseId?: string;
   }): void {
     if (!this.config.onToolCall) {
       return;
@@ -942,7 +949,13 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
     try {
       args = JSON.parse(fields.rawArgs || "{}");
     } catch {}
-    this.config.onToolCall({ itemId, callId, name, args });
+    this.config.onToolCall({
+      itemId,
+      callId,
+      name,
+      args,
+      ...(fields.responseId ? { responseId: fields.responseId } : {}),
+    });
   }
 
   private requestResponseCreate(instructions?: string): void {
@@ -1066,6 +1079,7 @@ export function buildQwenRealtimeVoiceProvider(): RealtimeVoiceProviderPlugin {
       supportsBargeIn: true,
       supportsToolCalls: true,
       supportsToolCallsForModel: supportsQwenRealtimeToolCalls,
+      supportsResponseToolCallCorrelation: true,
     },
     resolveConfig: ({ rawConfig }) => normalizeProviderConfig(rawConfig),
     isConfigured: ({ providerConfig }) =>

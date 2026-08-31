@@ -132,6 +132,7 @@ type RelaySession = {
   >;
   cancelledToolCalls: Map<string, { turnId: string }>;
   responseTurns: Map<string, string>;
+  cancelledResponseTurns: Map<string, string>;
   providerCancelRequests: Array<{ turnId: string; toolContinuation: boolean }>;
   forcedConsults: RealtimeVoiceForcedConsultCoordinator;
   transcript: RealtimeVoiceTranscriptEntry[];
@@ -540,10 +541,18 @@ export function createTalkRealtimeRelaySession(
       }
       if (
         event.responseId &&
-        relay?.talk.activeTurnId &&
-        !relay.responseTurns.has(event.responseId)
+        relay &&
+        !relay.responseTurns.has(event.responseId) &&
+        !relay.cancelledResponseTurns.has(event.responseId)
       ) {
-        relay.responseTurns.set(event.responseId, relay.talk.activeTurnId);
+        const pendingCancel = relay.providerCancelRequests[0];
+        const turnId = pendingCancel?.turnId ?? relay.talk.activeTurnId;
+        if (turnId) {
+          relay.responseTurns.set(event.responseId, turnId);
+          if (turnId !== relay.talk.activeTurnId) {
+            relay.cancelledResponseTurns.set(event.responseId, turnId);
+          }
+        }
         while (relay.responseTurns.size > MAX_RELAY_RESPONSE_CORRELATIONS) {
           const oldestResponseId = relay.responseTurns.keys().next().value;
           if (typeof oldestResponseId !== "string") {
@@ -653,7 +662,17 @@ export function createTalkRealtimeRelaySession(
     },
     onToolCall: (toolCall) => {
       const relay = relayRef.current;
-      const turnId = relay ? ensureRelayTurn(relay) : undefined;
+      const turnId = relay
+        ? resolveRelayProviderToolCallTurn(relay, toolCall.responseId)
+        : undefined;
+      if (relay && !turnId) {
+        relay.bridge.submitToolResult(
+          toolCall.callId,
+          { ok: false, errorCode: "TURN_CANCELLED" },
+          { suppressResponse: true },
+        );
+        return;
+      }
       if (relay && turnId && !relay.toolCalls.has(toolCall.callId)) {
         relay.toolCalls.set(toolCall.callId, {
           name: toolCall.name,
@@ -763,6 +782,7 @@ export function createTalkRealtimeRelaySession(
     toolCalls: new Map(),
     cancelledToolCalls: new Map(),
     responseTurns: new Map(),
+    cancelledResponseTurns: new Map(),
     providerCancelRequests: [],
     forcedConsults: createRealtimeVoiceForcedConsultCoordinator(),
     transcript: [],
@@ -855,6 +875,22 @@ function settleRelayProviderResponse(
   return cancelRelayTurnState(session, "provider-response-cancelled");
 }
 
+function resolveRelayProviderToolCallTurn(
+  session: RelaySession,
+  responseId: string | undefined,
+): string | undefined {
+  if (responseId) {
+    if (session.cancelledResponseTurns.has(responseId)) {
+      return undefined;
+    }
+    const correlatedTurnId = session.responseTurns.get(responseId);
+    if (correlatedTurnId) {
+      return correlatedTurnId === session.talk.activeTurnId ? correlatedTurnId : undefined;
+    }
+  }
+  return session.talk.activeTurnId;
+}
+
 function rememberCancelledRelayToolCalls(session: RelaySession, turnId: string): void {
   for (const [callId, call] of session.toolCalls) {
     if (call.turnId !== turnId) {
@@ -876,6 +912,18 @@ function cancelRelayTurnState(session: RelaySession, reason: string): TalkEvent 
   const activeTurnId = session.talk.activeTurnId;
   if (!activeTurnId) {
     return undefined;
+  }
+  for (const [responseId, turnId] of session.responseTurns) {
+    if (turnId === activeTurnId) {
+      session.cancelledResponseTurns.set(responseId, turnId);
+    }
+  }
+  while (session.cancelledResponseTurns.size > MAX_RELAY_RESPONSE_CORRELATIONS) {
+    const oldestResponseId = session.cancelledResponseTurns.keys().next().value;
+    if (typeof oldestResponseId !== "string") {
+      break;
+    }
+    session.cancelledResponseTurns.delete(oldestResponseId);
   }
   rememberCancelledRelayToolCalls(session, activeTurnId);
   const cancelled = session.talk.cancelTurn({
@@ -1220,9 +1268,14 @@ export async function steerTalkRealtimeRelayAgentRun(params: {
 export function cancelTalkRealtimeRelayTurn(params: {
   relaySessionId: string;
   connId: string;
+  turnId?: string;
   reason?: string;
 }): void {
   const session = getRelaySession(params.relaySessionId, params.connId);
+  const requestedTurnId = params.turnId?.trim();
+  if (requestedTurnId && requestedTurnId !== session.talk.activeTurnId) {
+    throw new Error("Realtime relay cancellation turn does not match the active turn");
+  }
   const reason = params.reason ?? "client-cancelled";
   cancelForcedConsults(session);
   session.bridge.handleBargeIn({

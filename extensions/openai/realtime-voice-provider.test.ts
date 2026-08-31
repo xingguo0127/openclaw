@@ -257,6 +257,7 @@ describe("buildOpenAIRealtimeVoiceProvider", () => {
       supportsBrowserSession: true,
       supportsBargeIn: true,
       supportsToolCalls: true,
+      supportsResponseToolCallCorrelation: true,
     });
   });
 
@@ -1477,6 +1478,7 @@ describe("buildOpenAIRealtimeVoiceProvider", () => {
       Buffer.from(
         JSON.stringify({
           type: "conversation.item.done",
+          response_id: "response-1",
           item: {
             id: "item_tool_1",
             type: "function_call",
@@ -1493,11 +1495,13 @@ describe("buildOpenAIRealtimeVoiceProvider", () => {
       callId: "call_1",
       name: "openclaw_agent_consult",
       args: { question: "delegate this" },
+      responseId: "response-1",
     });
     expect(onEvent).toHaveBeenCalledWith({
       direction: "server",
       type: "conversation.item.done",
       detail: "function_call name=openclaw_agent_consult",
+      responseId: "response-1",
     });
   });
 
