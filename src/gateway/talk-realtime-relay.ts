@@ -37,6 +37,7 @@ import {
   createRealtimeVoiceBridgeSession,
   type RealtimeVoiceBridgeSession,
 } from "../talk/session-runtime.js";
+import { isLossyTalkEventType } from "../talk/talk-events.js";
 import {
   type TalkEvent,
   type TalkEventInput,
@@ -261,20 +262,13 @@ function broadcastToOwner(
   context: GatewayRequestContext,
   connId: string,
   event: TalkRealtimeRelayEvent,
-  options: { dropIfSlow?: boolean } = { dropIfSlow: true },
+  options: { dropIfSlow?: boolean } = { dropIfSlow: false },
 ): void {
   context.broadcastToConnIds(RELAY_EVENT, event, new Set([connId]), options);
 }
 
-function relayEventDeliveryOptions(event: TalkRealtimeRelayEventPayload): { dropIfSlow?: boolean } {
-  switch (event.type) {
-    case "ready":
-    case "error":
-    case "close":
-      return { dropIfSlow: false };
-    default:
-      return { dropIfSlow: true };
-  }
+function relayEventDeliveryOptions(talkEvent?: TalkEvent): { dropIfSlow?: boolean } {
+  return { dropIfSlow: talkEvent ? isLossyTalkEventType(talkEvent.type) : false };
 }
 
 function abortRelayAgentRuns(session: RelaySession, reason: string): void {
@@ -432,16 +426,18 @@ export function createTalkRealtimeRelaySession(
     },
     { onEvent: recordTalkObservabilityEvent },
   );
-  const emit = (event: TalkRealtimeRelayEventPayload, talkEvent?: TalkEventInput) =>
+  const emit = (event: TalkRealtimeRelayEventPayload, talkEventInput?: TalkEventInput) => {
+    const talkEvent = talkEventInput ? talk.emit(talkEventInput) : undefined;
     broadcastToOwner(
       params.context,
       params.connId,
       {
         ...event,
-        ...(talkEvent ? { talkEvent: talk.emit(talkEvent) } : {}),
+        ...(talkEvent ? { talkEvent } : {}),
       },
-      relayEventDeliveryOptions(event),
+      relayEventDeliveryOptions(talkEvent),
     );
+  };
   let currentOutputItemId: string | undefined;
   let currentOutputResponseId: string | undefined;
   let ready = false;
@@ -536,6 +532,11 @@ export function createTalkRealtimeRelaySession(
       }
       if (event.direction !== "server") {
         return;
+      }
+      if (event.type === "input_audio_buffer.speech_started") {
+        params.context.logGateway?.info(
+          `[talk] provider VAD speech_started relaySessionId=${relaySessionId}${event.detail ? ` ${event.detail}` : ""}`,
+        );
       }
       if (
         event.responseId &&
@@ -1015,16 +1016,22 @@ export function sendTalkRealtimeRelayAudio(params: {
   const turnId = ensureRelayTurn(session);
   const audio = Buffer.from(params.audioBase64, "base64");
   session.bridge.sendAudio(audio);
-  broadcastToOwner(session.context, session.connId, {
-    relaySessionId: session.id,
-    type: "inputAudio",
-    byteLength: audio.byteLength,
-    talkEvent: session.talk.emit({
-      type: "input.audio.delta",
-      turnId,
-      payload: { byteLength: audio.byteLength },
-    }),
+  const talkEvent = session.talk.emit({
+    type: "input.audio.delta",
+    turnId,
+    payload: { byteLength: audio.byteLength },
   });
+  broadcastToOwner(
+    session.context,
+    session.connId,
+    {
+      relaySessionId: session.id,
+      type: "inputAudio",
+      byteLength: audio.byteLength,
+      talkEvent,
+    },
+    relayEventDeliveryOptions(talkEvent),
+  );
   if (typeof params.timestamp === "number" && Number.isFinite(params.timestamp)) {
     session.bridge.setMediaTimestamp(params.timestamp);
   }

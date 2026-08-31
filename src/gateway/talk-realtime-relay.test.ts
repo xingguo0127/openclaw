@@ -293,6 +293,7 @@ describe("talk realtime gateway relay", () => {
       sessionId: session.relaySessionId,
       type: "session.ready",
       seq: 1,
+      controlSeq: 1,
       mode: "realtime",
       transport: "gateway-relay",
       brain: "agent-consult",
@@ -309,6 +310,7 @@ describe("talk realtime gateway relay", () => {
       audioBase64: Buffer.from("audio-out").toString("base64"),
     });
     expectRecordFields(audioPayload.talkEvent, { type: "output.audio.delta" });
+    expect(audioPayload.talkEvent).not.toHaveProperty("controlSeq");
     const audioEvent = events.find((entry) => entry.payload === audioPayload);
     expectRecordFields(audioEvent?.opts, { dropIfSlow: true });
 
@@ -324,6 +326,8 @@ describe("talk realtime gateway relay", () => {
       final: true,
     });
     expectRecordFields(userTranscript.talkEvent, { type: "transcript.done", final: true });
+    const userTranscriptEvent = events.find((entry) => entry.payload === userTranscript);
+    expectRecordFields(userTranscriptEvent?.opts, { dropIfSlow: false });
 
     const assistantTranscript = findEventPayload(
       events,
@@ -356,6 +360,8 @@ describe("talk realtime gateway relay", () => {
       itemId: "item-1",
       callId: "call-1",
     });
+    const toolCallEvent = events.find((entry) => entry.payload === toolCallPayload);
+    expectRecordFields(toolCallEvent?.opts, { dropIfSlow: false });
 
     sendTalkRealtimeRelayAudio({
       relaySessionId: session.relaySessionId,

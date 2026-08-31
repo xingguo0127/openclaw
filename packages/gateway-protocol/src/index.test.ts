@@ -357,6 +357,7 @@ describe("validateTalkEvent", () => {
         turnId: "turn-1",
         captureId: "capture-1",
         seq: 1,
+        controlSeq: 1,
         timestamp: "2026-05-05T12:00:00.000Z",
         mode: "stt-tts",
         transport: "managed-room",

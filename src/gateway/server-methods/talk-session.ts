@@ -22,6 +22,7 @@ import { REALTIME_VOICE_AGENT_CONTROL_TOOL } from "../../talk/agent-run-control-
 import { controlRealtimeVoiceAgentRun } from "../../talk/agent-run-control.js";
 import {
   FLOWGO_EXPRESSION_CAPABILITY,
+  FLOWGO_EXPRESSION_INSTRUCTIONS,
   FLOWGO_EXPRESSION_TOOL,
 } from "../../talk/flowgo-expression-tool.js";
 import { resolveConfiguredRealtimeVoiceProvider } from "../../talk/provider-resolver.js";
@@ -378,7 +379,10 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           cfg: runtimeConfig,
           provider: resolution.provider,
           providerConfig,
-          instructions: buildRealtimeInstructions(realtimeConfig.instructions),
+          instructions: [
+            buildRealtimeInstructions(realtimeConfig.instructions),
+            ...(flowgoExpressionEnabled ? [FLOWGO_EXPRESSION_INSTRUCTIONS] : []),
+          ].join("\n\n"),
           // force 模式下网关每轮强制转交,provider 无需(也不应)持有任何工具 —— 否则:
           //   ①调 consult → 与强制转交双重进 DeepSeek(文本去重按串匹配,改写 vs 原话 → 去重失效);
           //   ②调 control → app 侧把 control 重路由成 consult,同样双重。

@@ -153,6 +153,7 @@ export const TalkEventSchema = Type.Object(
     turnId: Type.Optional(Type.String()),
     captureId: Type.Optional(Type.String()),
     seq: Type.Integer({ minimum: 1 }),
+    controlSeq: Type.Optional(Type.Integer({ minimum: 1 })),
     timestamp: NonEmptyString,
     mode: TalkModeSchema,
     transport: TalkTransportSchema,

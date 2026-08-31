@@ -23,7 +23,7 @@ import type {
   RealtimeVoiceBrowserSession,
   RealtimeVoiceProviderConfig,
 } from "../../talk/provider-types.js";
-import type { TalkEvent } from "../../talk/talk-events.js";
+import { isLossyTalkEventType, type TalkEvent } from "../../talk/talk-events.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
 import type { TalkHandoffTurnResult } from "../talk-handoff.js";
 
@@ -52,7 +52,7 @@ export function broadcastTalkRoomEvents(
       "talk.event",
       { handoffId: params.handoffId, roomId: params.roomId, talkEvent },
       new Set([connId]),
-      { dropIfSlow: true },
+      { dropIfSlow: isLossyTalkEventType(talkEvent.type) },
     );
   }
 }

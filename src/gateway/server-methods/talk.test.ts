@@ -981,6 +981,8 @@ describe("talk.session unified handlers", () => {
         }),
       ]),
     );
+    expect(relayInput.instructions).toContain("flowgo_show_expression");
+    expect(relayInput.instructions).toContain("Do not call it for a neutral reply");
     expectRespondOk(respond, {
       sessionId: "relay-flowgo-1",
       negotiatedCapabilities: ["flowgo.expression.v1"],
@@ -1047,6 +1049,7 @@ describe("talk.session unified handlers", () => {
       expect.objectContaining({ name: "openclaw_agent_consult" }),
       expect.objectContaining({ name: "openclaw_agent_control" }),
     ]);
+    expect(relayInput.instructions).not.toContain("flowgo_show_expression");
     expectRespondOk(respond, { negotiatedCapabilities: [] });
   });
 
@@ -1325,7 +1328,7 @@ describe("talk.session unified handlers", () => {
     });
     expectRecordFields(readyEventPayload.talkEvent, { type: "session.ready" });
     expect(mockCallArg(broadcastToConnIds, 0, 2)).toEqual(new Set(["conn-1"]));
-    expect(mockCallArg(broadcastToConnIds, 0, 3)).toEqual({ dropIfSlow: true });
+    expect(mockCallArg(broadcastToConnIds, 0, 3)).toEqual({ dropIfSlow: false });
 
     const startRespond = vi.fn();
     await talkHandlers["talk.session.startTurn"]({
@@ -1354,7 +1357,7 @@ describe("talk.session unified handlers", () => {
       turnId: "turn-1",
     });
     expect(mockCallArg(broadcastToConnIds, 1, 2)).toEqual(new Set(["conn-1"]));
-    expect(mockCallArg(broadcastToConnIds, 1, 3)).toEqual({ dropIfSlow: true });
+    expect(mockCallArg(broadcastToConnIds, 1, 3)).toEqual({ dropIfSlow: false });
 
     const mismatchedSteerRespond = vi.fn();
     await talkHandlers["talk.session.steer"]({
@@ -1423,7 +1426,7 @@ describe("talk.session unified handlers", () => {
     });
     expectRecordFields(closedEventPayload.talkEvent, { type: "session.closed", final: true });
     expect(mockCallArg(broadcastToConnIds, 2, 2)).toEqual(new Set(["conn-1"]));
-    expect(mockCallArg(broadcastToConnIds, 2, 3)).toEqual({ dropIfSlow: true });
+    expect(mockCallArg(broadcastToConnIds, 2, 3)).toEqual({ dropIfSlow: false });
   });
 
   it("passes managed-room spawnedBy visibility scope to session resolution", async () => {

@@ -1023,6 +1023,14 @@ class QwenRealtimeVoiceBridge implements RealtimeVoiceBridge {
   }
 
   private describeServerEvent(event: RealtimeEvent): string | undefined {
+    if (event.type === "input_audio_buffer.speech_started") {
+      return [
+        `responseActive=${this.responseActive}`,
+        `responseCreateInFlight=${this.responseCreateInFlight}`,
+        `playbackMarks=${this.markQueue.length}`,
+        `interruptEnabled=${this.config.interruptResponseOnInputAudio ?? this.config.autoRespondToAudio ?? true}`,
+      ].join(" ");
+    }
     if (event.type === "error") {
       return readRealtimeErrorDetail(event.error);
     }

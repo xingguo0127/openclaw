@@ -630,6 +630,7 @@ function emitTalkPttNodeEvent(params: {
     sessionId,
     captureId,
     seq,
+    controlSeq: seq,
     timestamp: new Date().toISOString(),
     mode: "stt-tts",
     transport: "managed-room",
@@ -649,7 +650,7 @@ function emitTalkPttNodeEvent(params: {
       command: params.command,
       talkEvent,
     },
-    { dropIfSlow: true },
+    { dropIfSlow: false },
   );
 }
 

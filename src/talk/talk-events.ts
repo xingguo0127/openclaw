@@ -72,6 +72,8 @@ export type TalkEvent<TPayload = unknown> = TalkEventContext & {
   turnId?: string;
   captureId?: string;
   seq: number;
+  /** Monotonic sequence for events that must never be dropped by a relay transport. */
+  controlSeq?: number;
   timestamp: string;
   final?: boolean;
   callId?: string;
@@ -101,6 +103,18 @@ export type TalkEventInput<TPayload = unknown> = {
 export type TalkEventSequencer = {
   next<TPayload>(input: TalkEventInput<TPayload>): TalkEvent<TPayload>;
 };
+
+const LOSSY_TALK_EVENT_TYPES = new Set<TalkEventType>([
+  "input.audio.delta",
+  "transcript.delta",
+  "output.text.delta",
+  "output.audio.delta",
+]);
+
+/** High-rate media/text deltas may be dropped under backpressure; lifecycle and tool events may not. */
+export function isLossyTalkEventType(type: TalkEventType): boolean {
+  return LOSSY_TALK_EVENT_TYPES.has(type);
+}
 
 // Turn-scoped event names must carry turnId so mixed audio/text/tool streams can be
 // reconstructed without guessing from sequence order alone.
@@ -148,11 +162,16 @@ export function createTalkEventSequencer(
   options: { now?: () => Date | string } = {},
 ): TalkEventSequencer {
   let seq = 0;
+  let controlSeq = 0;
   const now = options.now ?? (() => new Date());
   return {
     next<TPayload>(input: TalkEventInput<TPayload>): TalkEvent<TPayload> {
       assertTalkEventCorrelation(input);
       seq += 1;
+      const reliable = !isLossyTalkEventType(input.type);
+      if (reliable) {
+        controlSeq += 1;
+      }
       const timestamp =
         input.timestamp ??
         (() => {
@@ -166,6 +185,7 @@ export function createTalkEventSequencer(
         turnId: input.turnId,
         captureId: input.captureId,
         seq,
+        ...(reliable ? { controlSeq } : {}),
         timestamp,
         final: input.final,
         callId: input.callId,

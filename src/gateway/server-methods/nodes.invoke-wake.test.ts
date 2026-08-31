@@ -727,11 +727,12 @@ describe("node.invoke APNs wake path", () => {
       final: false,
     });
     expect(talkEvent.seq).toBeTypeOf("number");
+    expect(talkEvent.controlSeq).toBe(talkEvent.seq);
     expectRecordFields(talkEvent.payload, "talk event payload", {
       nodeId: "android-talk-node",
       command: "talk.ptt.start",
     });
-    expect(mockArg(broadcast, 0, 2)).toEqual({ dropIfSlow: true });
+    expect(mockArg(broadcast, 0, 2)).toEqual({ dropIfSlow: false });
   });
 
   it("clears stale registrations after an invalid device token wake failure", async () => {
