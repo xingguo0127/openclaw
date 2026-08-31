@@ -13,7 +13,12 @@ import {
 } from "./talk-transcription-relay.js";
 import { expectRecordFields, isRecord, requireRecord } from "./test-helpers.assertions.js";
 
-type BroadcastEvent = { event: string; payload: unknown; connIds: string[] };
+type BroadcastEvent = {
+  event: string;
+  payload: unknown;
+  connIds: string[];
+  opts?: { dropIfSlow?: boolean };
+};
 
 function createSttSessionMock(connect: () => Promise<void> = async () => {}) {
   return {
@@ -43,8 +48,13 @@ function createBroadcastContext() {
   const events: BroadcastEvent[] = [];
   const context = {
     getRuntimeConfig: () => ({}),
-    broadcastToConnIds: (event: string, payload: unknown, connIds: ReadonlySet<string>) => {
-      events.push({ event, payload, connIds: [...connIds] });
+    broadcastToConnIds: (
+      event: string,
+      payload: unknown,
+      connIds: ReadonlySet<string>,
+      opts?: { dropIfSlow?: boolean },
+    ) => {
+      events.push({ event, payload, connIds: [...connIds], opts });
     },
   } as never;
   return { context, events };
@@ -133,6 +143,12 @@ describe("talk transcription gateway relay", () => {
     expectRecordFields(sttRequest, "stt request", {
       providerConfig: { model: "stt-model" },
     });
+    expect(
+      events.find((event) => isRecord(event.payload) && event.payload.type === "partial")?.opts,
+    ).toEqual({ dropIfSlow: true });
+    expect(
+      events.find((event) => isRecord(event.payload) && event.payload.type === "transcript")?.opts,
+    ).toEqual({ dropIfSlow: false });
 
     sendTalkTranscriptionRelayAudio({
       transcriptionSessionId: session.transcriptionSessionId,

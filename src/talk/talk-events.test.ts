@@ -19,6 +19,7 @@ describe("talk event envelope", () => {
       id: "session-1:1",
       sessionId: "session-1",
       seq: 1,
+      controlSeq: 1,
       timestamp: "2026-05-05T12:00:00.000Z",
       mode: "realtime",
       transport: "gateway-relay",
@@ -60,6 +61,7 @@ describe("talk event envelope", () => {
       id: "session-voice:1",
       sessionId: "session-voice",
       seq: 1,
+      controlSeq: 1,
       timestamp: "2026-05-05T12:00:01.000Z",
       mode: "stt-tts",
       transport: "managed-room",
@@ -90,5 +92,29 @@ describe("talk event envelope", () => {
     expect(() => events.next({ type: "capture.started", payload: {} })).toThrow(
       "Talk event capture.started requires captureId",
     );
+  });
+
+  it("keeps a separate reliable sequence across lossy media deltas", () => {
+    const events = createTalkEventSequencer({
+      sessionId: "session-lossy",
+      mode: "realtime",
+      transport: "gateway-relay",
+      brain: "agent-consult",
+    });
+
+    expect(events.next({ type: "session.ready", payload: null })).toMatchObject({
+      seq: 1,
+      controlSeq: 1,
+    });
+    const mediaEvent = events.next({
+      type: "output.audio.delta",
+      turnId: "turn-1",
+      payload: null,
+    });
+    expect(mediaEvent).toMatchObject({ seq: 2 });
+    expect(mediaEvent).not.toHaveProperty("controlSeq");
+    expect(
+      events.next({ type: "tool.call", turnId: "turn-1", payload: { name: "example" } }),
+    ).toMatchObject({ seq: 3, controlSeq: 2 });
   });
 });

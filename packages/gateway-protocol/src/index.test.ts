@@ -27,6 +27,7 @@ import {
   validateTalkSessionCancelOutputParams,
   validateTalkSessionCancelTurnParams,
   validateTalkSessionCreateParams,
+  validateTalkSessionCreateResult,
   validateTalkSessionJoinParams,
   validateTalkSessionJoinResult,
   validateTalkSessionSubmitToolResultParams,
@@ -356,6 +357,7 @@ describe("validateTalkEvent", () => {
         turnId: "turn-1",
         captureId: "capture-1",
         seq: 1,
+        controlSeq: 1,
         timestamp: "2026-05-05T12:00:00.000Z",
         mode: "stt-tts",
         transport: "managed-room",
@@ -432,6 +434,7 @@ describe("validateTalkSession", () => {
         mode: "realtime",
         transport: "managed-room",
         brain: "agent-consult",
+        clientCapabilities: ["flowgo.expression.v1"],
       }),
     ).toBe(true);
     expect(
@@ -466,6 +469,35 @@ describe("validateTalkSession", () => {
         },
       }),
     ).toBe(true);
+  });
+
+  it("rejects duplicate or malformed Talk session client capabilities", () => {
+    expect(
+      validateTalkSessionCreateParams({
+        clientCapabilities: ["flowgo.expression.v1", "flowgo.expression.v1"],
+      }),
+    ).toBe(false);
+    expect(validateTalkSessionCreateParams({ clientCapabilities: ["FlowGo Expression"] })).toBe(
+      false,
+    );
+    expect(
+      validateTalkSessionCreateResult({
+        sessionId: "relay-1",
+        mode: "realtime",
+        transport: "gateway-relay",
+        brain: "agent-consult",
+        negotiatedCapabilities: ["flowgo.expression.v1"],
+      }),
+    ).toBe(true);
+    expect(
+      validateTalkSessionCreateResult({
+        sessionId: "relay-1",
+        mode: "realtime",
+        transport: "gateway-relay",
+        brain: "agent-consult",
+        negotiatedCapabilities: ["FlowGo Expression"],
+      }),
+    ).toBe(false);
   });
 
   it("rejects request-time instruction overrides for Talk session creation", () => {

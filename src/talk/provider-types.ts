@@ -38,6 +38,7 @@ export type RealtimeVoiceTool = {
   description: string;
   parameters: {
     type: "object";
+    additionalProperties?: false;
     properties: Record<string, unknown>;
     required?: string[];
   };
@@ -48,6 +49,7 @@ export type RealtimeVoiceToolCallEvent = {
   callId: string;
   name: string;
   args: unknown;
+  responseId?: string;
 };
 
 export type RealtimeVoiceToolResultOptions = {
@@ -57,6 +59,8 @@ export type RealtimeVoiceToolResultOptions = {
    */
   suppressResponse?: boolean;
   willContinue?: boolean;
+  /** Continue the assistant reply without speaking or summarizing the side-effect result. */
+  responseMode?: "default" | "silent-side-effect";
 };
 
 export type RealtimeVoiceBridgeEvent = {
@@ -88,6 +92,9 @@ export type RealtimeVoiceProviderCapabilities = {
   supportsBrowserSession?: boolean;
   supportsBargeIn?: boolean;
   supportsToolCalls?: boolean;
+  supportsToolCallsForModel?: (model: string | undefined) => boolean;
+  /** Provider tool events carry the response identity needed for stale-turn rejection. */
+  supportsResponseToolCallCorrelation?: boolean;
   supportsVideoFrames?: boolean;
   supportsSessionResumption?: boolean;
 };
@@ -204,4 +211,6 @@ export type RealtimeVoiceBargeInOptions = {
   audioPlaybackActive?: boolean;
   /** Interrupt even when normal barge-in audio-duration guards would treat the event as echo. */
   force?: boolean;
+  /** Drop any queued provider continuation that belongs to the interrupted response. */
+  discardPendingResponse?: boolean;
 };

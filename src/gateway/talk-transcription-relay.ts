@@ -8,6 +8,7 @@ import {
 import type { RealtimeTranscriptionProviderPlugin } from "../plugins/types.js";
 import type { RealtimeTranscriptionProviderConfig } from "../realtime-transcription/provider-types.js";
 import { recordTalkObservabilityEvent } from "../talk/observability.js";
+import { isLossyTalkEventType } from "../talk/talk-events.js";
 import {
   type TalkEvent,
   type TalkEventInput,
@@ -156,7 +157,9 @@ function broadcastToOwner(
   connId: string,
   event: TalkTranscriptionRelayEvent,
 ): void {
-  context.broadcastToConnIds(TRANSCRIPTION_EVENT, event, new Set([connId]), { dropIfSlow: true });
+  context.broadcastToConnIds(TRANSCRIPTION_EVENT, event, new Set([connId]), {
+    dropIfSlow: event.talkEvent ? isLossyTalkEventType(event.talkEvent.type) : false,
+  });
 }
 
 function ensureTranscriptionTurn(session: TranscriptionRelaySession): string {
