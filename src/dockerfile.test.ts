@@ -81,7 +81,9 @@ describe("Dockerfile", () => {
     expect(dockerfile).toContain(
       "ca-certificates curl git hostname lsof openssl procps python3 tini",
     );
-    expect(dockerfile).toContain('ENTRYPOINT ["tini", "-s", "--"]');
+    expect(dockerfile).toContain(
+      'ENTRYPOINT ["tini", "-s", "--", "/app/scripts/docker/openclaw-entrypoint.sh"]',
+    );
   });
 
   it("installs optional browser dependencies after pnpm install", async () => {
@@ -360,7 +362,7 @@ describe("Dockerfile", () => {
     expect(workflow).not.toContain("main-browser-arm64");
     expect(workflow).toContain("Smoke test amd64 browser image");
     expect(workflow).toContain("Smoke test arm64 browser image");
-    expect(workflow).toContain("chrome-headless-shell");
+    expect(workflow.match(/test -x \/usr\/bin\/chromium/gu)).toHaveLength(2);
     expect(workflow).toContain("grep -q '^ARG OPENCLAW_INSTALL_BROWSER' Dockerfile");
     expect(workflow).toContain("if: steps.tags.outputs.browser != ''");
     expect(workflow).toContain('git show "${SOURCE_REF}:Dockerfile"');

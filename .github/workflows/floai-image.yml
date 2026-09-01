@@ -7,12 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '镜像 tag（推到 ghcr.io/xingguo0127/openclaw:<tag>）'
+        description: "镜像 tag（推到 ghcr.io/xingguo0127/openclaw:<tag>）"
         required: true
         default: floai
-
-env:
-  IMAGE: ghcr.io/xingguo0127/openclaw
 
 jobs:
   # ── 每个架构在各自原生 runner 上 build，按 digest 推（不带 tag）──
@@ -25,13 +22,18 @@ jobs:
             runner: ubuntu-latest
             arch: amd64
           - platform: linux/arm64
-            runner: ubuntu-24.04-arm   # public 仓免费 arm64 原生 runner
+            runner: ubuntu-24.04-arm # public 仓免费 arm64 原生 runner
             arch: arm64
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
     steps:
+      - name: 生成小写 GHCR 镜像名
+        run: |
+          IMAGE_OWNER="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=ghcr.io/${IMAGE_OWNER}/openclaw" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
@@ -41,7 +43,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GHCR_PAT || github.token }}
 
       # default variant build；OPENCLAW_EXTENSIONS 保留 floai 自建能力依赖的插件。
       # ★ qwen 必须显式保留:根 package.json 的 files 里有 `!dist/extensions/qwen/**`
@@ -60,6 +62,7 @@ jobs:
           build-args: |
             OPENCLAW_EXTENSIONS=qwen,perplexity
             OPENCLAW_IMAGE_NPM_PACKAGES=@fly-ai/flyai-cli@1.0.16
+            OPENCLAW_INSTALL_BROWSER=1
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: 校验 FlowOS 必需插件（${{ matrix.arch }}）
@@ -68,6 +71,70 @@ jobs:
           docker pull "$IMAGE_REF"
           docker run --rm --entrypoint node "$IMAGE_REF" -e \
             "import('/app/dist/extensions/perplexity/index.js').then((plugin) => { if (!plugin.default) throw new Error('perplexity plugin has no default export') })"
+
+      - name: 校验 FlowOS QA Chromium（${{ matrix.arch }}）
+        run: |
+          IMAGE_REF="${IMAGE}@${{ steps.build.outputs.digest }}"
+          docker run --rm --entrypoint sh "$IMAGE_REF" -lc '
+            set -eu
+            chromium_path="$(readlink -f /usr/local/bin/chromium)"
+            flowos_path="$(readlink -f /usr/local/bin/flowos-qa-chromium)"
+            system_path="$(readlink -f /usr/bin/chromium)"
+            test -x "$chromium_path"
+            test "$chromium_path" = "$flowos_path"
+            test "$chromium_path" = "$system_path"
+            test ! -w "$flowos_path"
+            test ! -w "$(dirname "$flowos_path")"
+            test ! -w /opt
+            test ! -w /opt/openclaw
+            test ! -w /usr/bin
+            test ! -w /usr/local/bin
+            /usr/local/bin/flowos-qa-chromium --version
+
+            profile="$(mktemp -d)"
+            cleanup() {
+              if [ -n "${chromium_pid:-}" ]; then
+                kill "$chromium_pid" 2>/dev/null || true
+                wait "$chromium_pid" 2>/dev/null || true
+              fi
+              rm -rf "$profile"
+            }
+            trap cleanup EXIT INT TERM
+
+            /usr/local/bin/flowos-qa-chromium \
+              --headless=new \
+              --no-sandbox \
+              --disable-gpu \
+              --hide-scrollbars \
+              --no-first-run \
+              --no-default-browser-check \
+              --remote-debugging-port=0 \
+              --remote-allow-origins=* \
+              --user-data-dir="$profile" \
+              about:blank >"$profile/chromium.log" 2>&1 &
+            chromium_pid=$!
+
+            for attempt in $(seq 1 100); do
+              if ! kill -0 "$chromium_pid" 2>/dev/null; then
+                cat "$profile/chromium.log" >&2
+                exit 1
+              fi
+              if [ -s "$profile/DevToolsActivePort" ]; then
+                cdp_port="$(sed -n "1p" "$profile/DevToolsActivePort")"
+                case "$cdp_port" in
+                  *[!0-9]*|"") echo "无效 CDP 端口: $cdp_port" >&2; exit 1 ;;
+                esac
+                if curl -fsS "http://127.0.0.1:${cdp_port}/json/version" | grep -q '"Browser"'; then
+                  exit 0
+                fi
+              fi
+              sleep 0.1
+            done
+
+            cat "$profile/chromium.log" >&2
+            echo "Chromium CDP 未在 10 秒内就绪" >&2
+            exit 1
+          '
 
       - name: 导出 digest
         run: |
@@ -87,8 +154,13 @@ jobs:
     permissions:
       packages: write
     env:
-      JCR_REGISTRY: ${{ secrets.JCR_REGISTRY }}   # 京东云端点（空则跳过 JCR）；仓库直接挂注册表下，无额外命名空间
+      JCR_REGISTRY: ${{ secrets.JCR_REGISTRY }} # 京东云端点（空则跳过 JCR）；仓库直接挂注册表下，无额外命名空间
     steps:
+      - name: 生成小写 GHCR 镜像名
+        run: |
+          IMAGE_OWNER="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=ghcr.io/${IMAGE_OWNER}/openclaw" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
@@ -102,7 +174,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GHCR_PAT || github.token }}
 
       - name: 合并成多架构 manifest
         working-directory: /tmp/digests

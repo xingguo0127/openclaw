@@ -274,9 +274,8 @@ jobs:
           fi
           docker run --rm --entrypoint /bin/sh "${image_ref}" -lc '
             set -eu
-            browser="$(find /home/node/.cache/ms-playwright -maxdepth 5 -type f \( -name chrome -o -name chromium -o -name chrome-headless-shell \) -print | head -1)"
-            test -n "${browser}"
-            "${browser}" --version
+            test -x /usr/bin/chromium
+            /usr/bin/chromium --version
           '
 
   # Build arm64 image. Default and slim tags point to the same slim runtime.
@@ -484,9 +483,8 @@ jobs:
           fi
           docker run --rm --entrypoint /bin/sh "${image_ref}" -lc '
             set -eu
-            browser="$(find /home/node/.cache/ms-playwright -maxdepth 5 -type f \( -name chrome -o -name chromium -o -name chrome-headless-shell \) -print | head -1)"
-            test -n "${browser}"
-            "${browser}" --version
+            test -x /usr/bin/chromium
+            /usr/bin/chromium --version
           '
 
   # Create multi-platform manifests

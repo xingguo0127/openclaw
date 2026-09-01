@@ -201,6 +201,7 @@ COPY --from=runtime-assets --chown=node:node /app/${OPENCLAW_BUNDLED_PLUGIN_DIR}
 COPY --from=runtime-assets --chown=node:node /app/skills ./skills
 COPY --from=runtime-assets --chown=node:node /app/docs ./docs
 COPY --from=runtime-assets --chown=node:node /app/qa ./qa
+COPY --from=runtime-assets --chown=root:root /app/scripts/docker/openclaw-entrypoint.sh ./scripts/docker/openclaw-entrypoint.sh
 
 # Keep pnpm available in the runtime image for container-local workflows.
 # Use a shared Corepack home so the non-root `node` user does not need a
@@ -258,14 +259,21 @@ RUN if [ -n "$OPENCLAW_IMAGE_NPM_PACKAGES" ]; then \
 # Must run after node_modules COPY so playwright-core is available.
 ARG OPENCLAW_INSTALL_BROWSER=""
 ENV PLAYWRIGHT_BROWSERS_PATH=/home/node/.cache/ms-playwright
+ENV OPENCLAW_BAKED_BROWSER_PATH=/opt/openclaw/ms-playwright
 RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
     if [ -n "$OPENCLAW_INSTALL_BROWSER" ]; then \
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb && \
-      mkdir -p "$PLAYWRIGHT_BROWSERS_PATH" && \
-      node /app/node_modules/playwright-core/cli.js install --with-deps chromium && \
-      chown -R node:node "$PLAYWRIGHT_BROWSERS_PATH"; \
+      mkdir -p "$OPENCLAW_BAKED_BROWSER_PATH" && \
+      PLAYWRIGHT_BROWSERS_PATH="$OPENCLAW_BAKED_BROWSER_PATH" node /app/node_modules/playwright-core/cli.js install --with-deps chromium && \
+      chromium_path="$(PLAYWRIGHT_BROWSERS_PATH="$OPENCLAW_BAKED_BROWSER_PATH" node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" && \
+      test -x "$chromium_path" && \
+      ln -sf "$chromium_path" /usr/bin/chromium && \
+      ln -sf "$chromium_path" /usr/local/bin/chromium && \
+      ln -sf "$chromium_path" /usr/local/bin/flowos-qa-chromium && \
+      chown -R root:root /opt/openclaw && \
+      chmod -R a-w /opt/openclaw; \
     fi
 
 # Optionally install Docker CLI for sandbox container management.
@@ -309,7 +317,8 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
 
 # Expose the CLI binary without requiring npm global writes as non-root.
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw \
- && chmod 755 /app/openclaw.mjs
+ && chmod 755 /app/openclaw.mjs \
+ && chmod 755 /app/scripts/docker/openclaw-entrypoint.sh
 
 # Pre-create default named-volume mount points so first-run Docker volumes copy
 # node ownership from the image instead of starting as root-owned directories.
@@ -347,5 +356,5 @@ USER node
 # For external access from host/ingress, override bind to "lan" and set auth.
 HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-ENTRYPOINT ["tini", "-s", "--"]
+ENTRYPOINT ["tini", "-s", "--", "/app/scripts/docker/openclaw-entrypoint.sh"]
 CMD ["node", "openclaw.mjs", "gateway"]

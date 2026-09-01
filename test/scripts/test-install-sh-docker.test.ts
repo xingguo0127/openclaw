@@ -1,13 +1,6 @@
 // Test Install Sh Docker tests cover test install sh docker script behavior.
 import { spawn, spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { runInNewContext } from "node:vm";
@@ -19,6 +12,7 @@ const INSTALL_E2E_DOCKER_PATH = "scripts/test-install-sh-e2e-docker.sh";
 const INSTALL_E2E_DOCKERFILE_PATH = "scripts/docker/install-sh-e2e/Dockerfile";
 const INSTALL_E2E_RUNNER_PATH = "scripts/docker/install-sh-e2e/run.sh";
 const DOCKER_SETUP_PATH = "scripts/docker/setup.sh";
+const DOCKER_ENTRYPOINT_PATH = "scripts/docker/openclaw-entrypoint.sh";
 const HOST_TIMEOUT_PATH = "scripts/lib/host-timeout.sh";
 const PODMAN_SETUP_PATH = "scripts/podman/setup.sh";
 const PODMAN_QUADLET_TEMPLATE_PATH = "scripts/podman/openclaw.container.in";
@@ -31,7 +25,9 @@ const BUN_GLOBAL_SMOKE_PATH = "scripts/e2e/bun-global-install-smoke.sh";
 const BUN_GLOBAL_ASSERTIONS_PATH = "scripts/e2e/lib/bun-global-install/assertions.mjs";
 const INSTALL_SMOKE_WORKFLOW_PATH = ".github/workflows/install-smoke.yml";
 const RELEASE_CHECKS_WORKFLOW_PATH = ".github/workflows/openclaw-release-checks.yml";
+const DOCKER_RELEASE_WORKFLOW_PATH = ".github/workflows/docker-release.yml";
 const LIVE_E2E_WORKFLOW_PATH = ".github/workflows/openclaw-live-and-e2e-checks-reusable.yml";
+const FLOAI_IMAGE_WORKFLOW_PATH = ".github/workflows/floai-image.yml";
 const tempDirs = createTempDirTracker();
 
 afterEach(() => {
@@ -456,10 +452,54 @@ describe("test-install-sh-docker", () => {
     const dockerfile = readFileSync("Dockerfile", "utf8");
 
     expect(dockerfile).toContain("ENV PLAYWRIGHT_BROWSERS_PATH=/home/node/.cache/ms-playwright");
-    expect(dockerfile).toContain('mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"');
+    expect(dockerfile).toContain("ENV OPENCLAW_BAKED_BROWSER_PATH=/opt/openclaw/ms-playwright");
+    expect(dockerfile).toContain('mkdir -p "$OPENCLAW_BAKED_BROWSER_PATH"');
     expect(dockerfile).toContain(
-      "node /app/node_modules/playwright-core/cli.js install --with-deps chromium",
+      'PLAYWRIGHT_BROWSERS_PATH="$OPENCLAW_BAKED_BROWSER_PATH" node /app/node_modules/playwright-core/cli.js install --with-deps chromium',
     );
+    expect(dockerfile).toContain('require("playwright-core").chromium.executablePath()');
+    expect(dockerfile).toContain('ln -sf "$chromium_path" /usr/bin/chromium');
+    expect(dockerfile).toContain('ln -sf "$chromium_path" /usr/local/bin/chromium');
+    expect(dockerfile).toContain('ln -sf "$chromium_path" /usr/local/bin/flowos-qa-chromium');
+    expect(dockerfile).toContain("chown -R root:root /opt/openclaw");
+    expect(dockerfile).toContain("chmod -R a-w /opt/openclaw");
+    expect(dockerfile).not.toContain('chown -R node:node "$PLAYWRIGHT_BROWSERS_PATH"');
+  });
+
+  it("selects the immutable registry only for baked-browser runtime variants", () => {
+    const dockerfile = readFileSync("Dockerfile", "utf8");
+    const entrypoint = readFileSync(DOCKER_ENTRYPOINT_PATH, "utf8");
+    const releaseWorkflow = readFileSync(DOCKER_RELEASE_WORKFLOW_PATH, "utf8");
+
+    expect(dockerfile).toContain("chmod 755 /app/scripts/docker/openclaw-entrypoint.sh");
+    expect(dockerfile).toContain(
+      "COPY --from=runtime-assets --chown=root:root /app/scripts/docker/openclaw-entrypoint.sh ./scripts/docker/openclaw-entrypoint.sh",
+    );
+    expect(dockerfile).toContain(
+      'ENTRYPOINT ["tini", "-s", "--", "/app/scripts/docker/openclaw-entrypoint.sh"]',
+    );
+    expect(entrypoint).toContain("[ -x /usr/local/bin/flowos-qa-chromium ]");
+    expect(entrypoint).toContain("export PLAYWRIGHT_BROWSERS_PATH=/opt/openclaw/ms-playwright");
+    expect(entrypoint).toContain('exec "$@"');
+    expect(releaseWorkflow.match(/test -x \/usr\/bin\/chromium/gu)).toHaveLength(2);
+    expect(releaseWorkflow).not.toContain("find /home/node/.cache/ms-playwright");
+  });
+
+  it("bakes and smoke-tests Chromium in the FlowOS image workflow", () => {
+    const workflow = readFileSync(FLOAI_IMAGE_WORKFLOW_PATH, "utf8");
+
+    expect(workflow.match(/IMAGE_OWNER=/gu)).toHaveLength(2);
+    expect(workflow.match(/tr '\[:upper:\]' '\[:lower:\]'/gu)).toHaveLength(2);
+    expect(workflow.match(/IMAGE=ghcr\.io\/\$\{IMAGE_OWNER\}\/openclaw/gu)).toHaveLength(2);
+    expect(workflow).toContain("secrets.GHCR_PAT || github.token");
+    expect(workflow).toContain("OPENCLAW_INSTALL_BROWSER=1");
+    expect(workflow).toContain("校验 FlowOS QA Chromium");
+    expect(workflow).toContain("/usr/local/bin/flowos-qa-chromium --version");
+    expect(workflow).toContain('test ! -w "$flowos_path"');
+    expect(workflow).toContain('test ! -w "$(dirname "$flowos_path")"');
+    expect(workflow).toContain('test "$chromium_path" = "$system_path"');
+    expect(workflow).toContain("test ! -w /opt/openclaw");
+    expect(workflow).toContain("/json/version");
   });
 
   it("passes the baked browser build arg through Docker setup", () => {
