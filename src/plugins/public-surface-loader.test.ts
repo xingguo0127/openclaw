@@ -121,45 +121,29 @@ describe("bundled plugin public surface loader", () => {
     });
   });
 
-  it("prefers source require for bundled source public artifacts when a ts require hook exists", async () => {
-    const createJiti = vi.fn(() => vi.fn(() => ({ marker: "jiti-should-not-run" })));
-    vi.doMock("jiti", () => ({
-      createJiti,
-    }));
-    const requireLoader = Object.assign(
-      vi.fn(() => ({ marker: "source-require-ok" })),
-      {
-        extensions: {
-          ".ts": vi.fn(),
-        },
-      },
-    );
-    vi.doMock("node:module", async () => {
-      const actual = await vi.importActual<typeof import("node:module")>("node:module");
-      return Object.assign({}, actual, {
-        createRequire: vi.fn(() => requireLoader),
-      });
-    });
-
+  it("transforms source public artifacts with JavaScript dependency specifiers", async () => {
     const publicSurfaceLoader = await importFreshModule<
       typeof import("./public-surface-loader.js")
-    >(import.meta.url, "./public-surface-loader.js?scope=source-require-fast-path");
+    >(import.meta.url, "./public-surface-loader.js?scope=source-transform-dependencies");
     const tempRoot = createTempDir();
     const bundledPluginsDir = path.join(tempRoot, "extensions");
     process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = bundledPluginsDir;
 
     const modulePath = path.join(bundledPluginsDir, "demo", "secret-contract-api.ts");
     fs.mkdirSync(path.dirname(modulePath), { recursive: true });
-    fs.writeFileSync(modulePath, 'export const marker = "source-require-ok";\n', "utf8");
+    fs.writeFileSync(
+      path.join(path.dirname(modulePath), "models.ts"),
+      'export const marker = "source-transform-ok";\n',
+      "utf8",
+    );
+    fs.writeFileSync(modulePath, 'export { marker } from "./models.js";\n', "utf8");
 
     expect(
       publicSurfaceLoader.loadBundledPluginPublicArtifactModuleSync<{ marker: string }>({
         dirName: "demo",
         artifactBasename: "secret-contract-api.js",
       }).marker,
-    ).toBe("source-require-ok");
-    expect(requireLoader).toHaveBeenCalledWith(fs.realpathSync(modulePath));
-    expect(createJiti).not.toHaveBeenCalled();
+    ).toBe("source-transform-ok");
   });
 
   it("keeps bundled dist public artifacts on the native path", async () => {
