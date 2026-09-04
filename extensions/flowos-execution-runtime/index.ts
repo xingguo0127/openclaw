@@ -8,6 +8,7 @@ import {
   FlowosExecutionClient,
   resolveTrustedAssistEndpoint,
 } from "./src/client.js";
+import { createImageGenerationTool, ImageGenerationRunStore } from "./src/image-generation.js";
 import { getExecutionLocks } from "./src/locks.js";
 import { FlowosExecutionRuntime } from "./src/runtime.js";
 import { createFlowosExecutionTools } from "./src/tools.js";
@@ -16,6 +17,7 @@ import { validateSpaceArtifact } from "./src/validation.js";
 const pluginId = "flowos-execution-runtime";
 const bindingNamespace = "run-bindings";
 const executionRuntimePurpose = "flowos-execution-runtime-v1";
+const imageGenerationRuntimePurpose = "flowos-image-generation-runtime-v1";
 const standardOwnerAgentId = "agent:main";
 const nodeSendKey = Symbol.for("openclaw.gateway.nodeSendToSession");
 
@@ -86,14 +88,27 @@ export function deriveExecutionRuntimeToken(env: NodeJS.ProcessEnv = process.env
   return createHmac("sha256", master).update(executionRuntimePurpose).digest("hex");
 }
 
+export function deriveImageGenerationRuntimeToken(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const master =
+    env.FLOWOS_TASK_CENTER_JWT_SECRET?.trim() ||
+    loadPrivateSecretFile(env.FLOWOS_TASK_CENTER_JWT_SECRET_FILE?.trim() ?? "");
+  if (Buffer.byteLength(master, "utf8") < 32) {
+    return null;
+  }
+  return createHmac("sha256", master).update(imageGenerationRuntimePurpose).digest("hex");
+}
+
 export default definePluginEntry({
   id: pluginId,
   name: "FlowOS Execution Runtime",
-  description: "Bind standard FlowOS long-task Execution tools to OpenClaw subagent runs",
+  description: "Bind trusted FlowOS execution and paid capability tools to OpenClaw runs",
   register(api) {
     const endpoint = resolveTrustedAssistEndpoint(process.env.ASSIST_API_BASE);
     const token = deriveExecutionRuntimeToken();
-    if (!endpoint || !token) {
+    const imageToken = deriveImageGenerationRuntimeToken();
+    if (!endpoint || !token || !imageToken) {
       throw new Error("FlowOS standard tenant identity config is required");
     }
     const ownerAgentId = standardOwnerAgentId;
@@ -105,6 +120,8 @@ export default definePluginEntry({
       }),
     );
     const client = new FlowosExecutionClient(createAssistRequest(endpoint, token));
+    const imageRequest = createAssistRequest(endpoint, imageToken, { timeoutMs: 180_000 });
+    const imageRuns = new ImageGenerationRunStore();
     const runtime = new FlowosExecutionRuntime(
       client,
       bindings,
@@ -124,8 +141,8 @@ export default definePluginEntry({
     );
 
     api.registerTool(
-      (context) =>
-        createFlowosExecutionTools({
+      (context) => [
+        ...createFlowosExecutionTools({
           api,
           context,
           client,
@@ -145,6 +162,13 @@ export default definePluginEntry({
             });
           },
         }),
+        createImageGenerationTool({
+          context,
+          request: imageRequest,
+          runs: imageRuns,
+          ownerAgentId,
+        }),
+      ],
       {
         names: [
           "flowos_execution_start",
@@ -152,9 +176,17 @@ export default definePluginEntry({
           "flowos_execution_spawn",
           "flowos_execution_complete",
           "flowos_execution_fail",
+          "flowos_image_generate",
         ],
       },
     );
+
+    api.on("before_agent_run", (_event, ctx) => {
+      imageRuns.begin(ctx);
+    });
+    api.on("agent_end", (event, ctx) => {
+      imageRuns.end({ sessionKey: ctx.sessionKey, runId: event.runId ?? ctx.runId });
+    });
 
     api.on("subagent_ended", async (event, ctx) => {
       await runtime.subagentEnded(event, ctx);

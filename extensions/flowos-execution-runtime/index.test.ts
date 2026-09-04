@@ -2,7 +2,11 @@ import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import plugin, { deliverExecutionResultCard, deriveExecutionRuntimeToken } from "./index.js";
+import plugin, {
+  deliverExecutionResultCard,
+  deriveExecutionRuntimeToken,
+  deriveImageGenerationRuntimeToken,
+} from "./index.js";
 import { RunBindingStore, type RunBinding } from "./src/bindings.js";
 import {
   type ActiveExecution,
@@ -505,6 +509,9 @@ describe("FlowOS Execution plugin boundaries", () => {
       expect(deriveExecutionRuntimeToken({ FLOWOS_TASK_CENTER_JWT_SECRET_FILE: tokenFile })).toBe(
         expected,
       );
+      expect(
+        deriveImageGenerationRuntimeToken({ FLOWOS_TASK_CENTER_JWT_SECRET_FILE: tokenFile }),
+      ).not.toBe(expected);
       expect(existsSync(tokenFile)).toBe(true);
       chmodSync(tokenFile, 0o644);
       expect(
@@ -554,8 +561,13 @@ describe("FlowOS Execution plugin boundaries", () => {
       sessionKey: "agent:main:main",
       workspaceDir: "/tmp/workspace",
     });
-    expect(registered).toHaveLength(5);
-    expect(on.mock.calls.map((call) => call[0])).toEqual(["subagent_ended", "gateway_start"]);
+    expect(registered).toHaveLength(6);
+    expect(on.mock.calls.map((call) => call[0])).toEqual([
+      "before_agent_run",
+      "agent_end",
+      "subagent_ended",
+      "gateway_start",
+    ]);
   });
 
   it("tool schemas never expose owner identity endpoint or credential arguments", () => {

@@ -50,7 +50,12 @@ export function resolveTrustedAssistEndpoint(value: unknown): URL | null {
   }
 }
 
-export function createAssistRequest(endpoint: URL, token: string): AssistRequest {
+export function createAssistRequest(
+  endpoint: URL,
+  token: string,
+  options: { timeoutMs?: number } = {},
+): AssistRequest {
+  const timeoutMs = options.timeoutMs ?? 15_000;
   return async (method, path, payload) => {
     const body = payload === undefined ? undefined : JSON.stringify(payload);
     return await new Promise((resolve, reject) => {
@@ -68,7 +73,7 @@ export function createAssistRequest(endpoint: URL, token: string): AssistRequest
               ? {}
               : { "content-type": "application/json", "content-length": Buffer.byteLength(body) }),
           },
-          timeout: 15_000,
+          timeout: timeoutMs,
         },
         (response) => {
           const chunks: Buffer[] = [];
