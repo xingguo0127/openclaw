@@ -30,6 +30,8 @@ export type OpenClawPluginToolContext = {
   runId?: string;
   /** Runtime-owned source that initiated the current run. */
   trigger?: string;
+  /** Runtime-verified sender ownership; absent is untrusted. */
+  senderIsOwner?: boolean;
   /**
    * Runtime-supplied active model metadata for informational use, diagnostics,
    * and plugin-owned policy decisions. This is not a security boundary against

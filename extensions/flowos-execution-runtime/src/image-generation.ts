@@ -39,6 +39,7 @@ export class ImageGenerationRunStore {
       !sessionId ||
       !runId ||
       context.trigger !== "user" ||
+      context.senderIsOwner !== true ||
       isSubagentSessionKey(sessionKey) ||
       normalizedAgentId !== ownerAgentId
     ) {

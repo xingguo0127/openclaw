@@ -978,6 +978,7 @@ export function createOpenClawCodingTools(options?: {
             sessionId: options?.sessionId,
             runId: options?.runId,
             trigger: options?.trigger,
+            senderIsOwner: options?.senderIsOwner,
             oneShotCliRun: options?.oneShotCliRun,
             sandboxBrowserBridgeUrl: sandbox?.browser?.bridgeUrl,
             allowHostBrowserControl: sandbox ? sandbox.browserAllowHostControl : true,

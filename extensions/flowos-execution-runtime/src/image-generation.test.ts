@@ -9,6 +9,7 @@ const context: OpenClawPluginToolContext = {
   sessionId: "conversation-1",
   runId: "run-1",
   trigger: "user",
+  senderIsOwner: true,
 };
 
 afterEach(() => vi.unstubAllEnvs());
@@ -150,4 +151,23 @@ describe("FlowOS image generation private tool", () => {
     });
     await expect(tool.execute("call-1", { prompt: "猫" })).rejects.toThrow("trusted owner session");
   });
+
+  it.each([false, undefined])(
+    "fails closed for senderIsOwner=%s before requesting Assist",
+    async (senderIsOwner) => {
+      const request = vi.fn(async () => succeeded());
+      const tool = createImageGenerationTool({
+        context: { ...context, senderIsOwner },
+        request,
+        runs: new ImageGenerationRunStore(),
+        ownerAgentId: "agent:main",
+        inject: vi.fn(async () => ({ ok: true as const })),
+      });
+
+      await expect(tool.execute("call-1", { prompt: "猫" })).rejects.toThrow(
+        "trusted owner session",
+      );
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
 });

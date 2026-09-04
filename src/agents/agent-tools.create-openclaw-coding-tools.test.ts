@@ -603,6 +603,7 @@ describe("createOpenClawCodingTools", () => {
         modelId: "openrouter/auto",
         runId: "run-user-1",
         trigger: "user",
+        senderIsOwner: true,
         toolConstructionPlan: {
           includeBaseCodingTools: false,
           includeShellTools: false,
@@ -619,6 +620,7 @@ describe("createOpenClawCodingTools", () => {
       expect(pluginToolOptions?.modelId).toBe("openrouter/auto");
       expect(pluginToolOptions?.runId).toBe("run-user-1");
       expect(pluginToolOptions?.trigger).toBe("user");
+      expect(pluginToolOptions?.senderIsOwner).toBe(true);
     } finally {
       resolvePluginToolsSpy.mockRestore();
     }

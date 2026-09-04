@@ -50,11 +50,13 @@ describe("openclaw plugin tool context", () => {
         config: {} as never,
         runId: "run-1",
         trigger: "user",
+        senderIsOwner: true,
       },
     });
 
     expect(result.context.runId).toBe("run-1");
     expect(result.context.trigger).toBe("user");
+    expect(result.context.senderIsOwner).toBe(true);
   });
 
   it("forwards runtime-owned active model metadata", () => {
