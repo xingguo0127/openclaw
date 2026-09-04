@@ -109,7 +109,7 @@ export function createImageGenerationTool(params: {
     name: "flowos_image_generate",
     label: "FlowOS Image Generate",
     description:
-      "Generate one image for the current explicit user request and deliver it as a media card.",
+      "Primary image-generation tool for explicit FlowOS user chat requests. Use this instead of image_generate; it generates one image through FlowOS and delivers a durable media card.",
     executionMode: "sequential",
     parameters: Type.Object(
       { prompt: Type.String({ minLength: 1, maxLength: 4000 }) },
