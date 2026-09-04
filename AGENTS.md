@@ -3,6 +3,14 @@
 Telegraph style. Root rules only. Read scoped `AGENTS.md` before subtree work.
 Skills own workflows; root owns hard policy and routing.
 
+## FlowOS local DEMO override
+
+- In `/Users/zhangxingguo/Desktop/FlowOS`, FlowOS product work is currently solo DEMO development. The parent `../AGENTS.md` DEMO section overrides this repository's general review and validation ceremony for that work.
+- For ordinary FlowOS DEMO changes: identify the actual local runtime component, implement the smallest end-to-end path, build/restart only affected components, verify on the real FlowPhone first, then run only a few directly relevant tests.
+- Do not require Work/REQ records, a new worktree, fixed-SHA review, autoreview loops, Crabbox/Testbox, broad checks, or full suites unless the user explicitly asks or the change crosses a real production, destructive-data, credential, billing, migration, or tenant-isolation boundary.
+- Tests, harnesses, and backend smoke do not substitute for real-device acceptance and must not be presented as feature completion.
+- If this section conflicts with later review/validation defaults, this section wins for FlowOS DEMO work; security and destructive-action boundaries still apply.
+
 ## Start
 
 - Repo: `https://github.com/openclaw/openclaw`
