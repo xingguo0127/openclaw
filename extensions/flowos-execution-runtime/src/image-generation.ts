@@ -6,7 +6,12 @@ import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import { Type } from "typebox";
 import type { AssistRequest } from "./client.js";
 
-type ActiveRun = { runId: string; sessionId: string; delivered: boolean };
+type ActiveRun = {
+  sessionKey: string;
+  runId: string;
+  sessionId: string;
+  delivered: boolean;
+};
 type NodeSend = (sessionKey: string, event: string, payload: unknown) => void;
 const nodeSendKey = Symbol.for("openclaw.gateway.nodeSendToSession");
 const maxRememberedSessions = 1024;
@@ -23,65 +28,39 @@ type GeneratedAsset = {
 export class ImageGenerationRunStore {
   private readonly runs = new Map<string, ActiveRun>();
 
-  begin(context: {
-    sessionKey?: string;
-    sessionId?: string;
-    runId?: string;
-    trigger?: string;
-  }): void {
+  require(context: OpenClawPluginToolContext, ownerAgentId: string): ActiveRun {
     const sessionKey = context.sessionKey?.trim();
     const sessionId = context.sessionId?.trim();
     const runId = context.runId?.trim();
-    if (sessionKey && context.trigger !== "user") {
-      this.runs.delete(sessionKey);
-      return;
+    const agentId = context.agentId?.trim();
+    const normalizedAgentId = agentId?.startsWith("agent:") ? agentId : `agent:${agentId}`;
+    if (
+      !sessionKey ||
+      !sessionId ||
+      !runId ||
+      context.trigger !== "user" ||
+      context.senderIsOwner !== true ||
+      isSubagentSessionKey(sessionKey) ||
+      normalizedAgentId !== ownerAgentId
+    ) {
+      throw new Error("FlowOS image generation requires the trusted owner session");
     }
-    if (sessionKey && sessionId && runId) {
-      const active = this.runs.get(sessionKey);
-      if (active?.sessionId === sessionId && active.runId === runId) {
-        return;
-      }
-      this.runs.delete(sessionKey);
-      this.runs.set(sessionKey, { sessionId, runId, delivered: false });
+    const key = `${sessionKey}\0${sessionId}\0${runId}`;
+    let active = this.runs.get(key);
+    if (!active) {
+      active = { sessionKey, sessionId, runId, delivered: false };
+      this.runs.set(key, active);
       while (this.runs.size > maxRememberedSessions) {
         const oldest = this.runs.keys().next().value;
         if (typeof oldest !== "string") break;
         this.runs.delete(oldest);
       }
     }
-  }
-
-  end(_context: { sessionKey?: string; runId?: string }): void {
-    // agent_end is emitted for every attempt, including attempts followed by an
-    // outer-run retry. Keep the delivery fact until begin observes a new runId.
-  }
-
-  require(
-    context: OpenClawPluginToolContext,
-    ownerAgentId: string,
-  ): ActiveRun & { sessionKey: string } {
-    const sessionKey = context.sessionKey?.trim();
-    const agentId = context.agentId?.trim();
-    const normalizedAgentId = agentId?.startsWith("agent:") ? agentId : `agent:${agentId}`;
-    if (!sessionKey || isSubagentSessionKey(sessionKey) || normalizedAgentId !== ownerAgentId) {
-      throw new Error("FlowOS image generation requires the trusted owner session");
-    }
-    const active = this.runs.get(sessionKey);
-    if (!active || active.sessionId !== context.sessionId?.trim()) {
-      throw new Error("FlowOS image generation requires an active trusted user turn");
-    }
-    return { sessionKey, ...active };
-  }
-
-  markDelivered(sessionKey: string, runId: string): void {
-    const active = this.runs.get(sessionKey);
-    if (active?.runId === runId) {
-      active.delivered = true;
-    }
+    return active;
   }
 }
 
-function operationKey(active: ActiveRun & { sessionKey: string }): string {
+function operationKey(active: ActiveRun): string {
   const digest = createHash("sha256")
     .update(`${active.sessionKey}\0${active.sessionId}\0${active.runId}`)
     .digest("hex");
@@ -178,7 +157,7 @@ export function createImageGenerationTool(params: {
           params.nodeSend ??
           ((globalThis as Record<PropertyKey, unknown>)[nodeSendKey] as NodeSend | undefined);
         nodeSend?.(active.sessionKey, "canvas.card.push", { cardJson });
-        params.runs.markDelivered(active.sessionKey, active.runId);
+        active.delivered = true;
       }
       return jsonResult({
         status: "succeeded",

@@ -26,6 +26,12 @@ export type OpenClawPluginToolContext = {
   sessionKey?: string;
   /** Ephemeral session UUID - regenerated on /new and /reset. Use for per-conversation isolation. */
   sessionId?: string;
+  /** Stable runtime-owned identifier for the current agent run. */
+  runId?: string;
+  /** Runtime-owned source that initiated the current run. */
+  trigger?: string;
+  /** Runtime-verified sender ownership; absent is untrusted. */
+  senderIsOwner?: boolean;
   /**
    * Runtime-supplied active model metadata for informational use, diagnostics,
    * and plugin-owned policy decisions. This is not a security boundary against

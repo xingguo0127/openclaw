@@ -562,12 +562,7 @@ describe("FlowOS Execution plugin boundaries", () => {
       workspaceDir: "/tmp/workspace",
     });
     expect(registered).toHaveLength(6);
-    expect(on.mock.calls.map((call) => call[0])).toEqual([
-      "before_agent_run",
-      "agent_end",
-      "subagent_ended",
-      "gateway_start",
-    ]);
+    expect(on.mock.calls.map((call) => call[0])).toEqual(["subagent_ended", "gateway_start"]);
   });
 
   it("tool schemas never expose owner identity endpoint or credential arguments", () => {

@@ -181,13 +181,6 @@ export default definePluginEntry({
       },
     );
 
-    api.on("before_agent_run", (_event, ctx) => {
-      imageRuns.begin(ctx);
-    });
-    api.on("agent_end", (event, ctx) => {
-      imageRuns.end({ sessionKey: ctx.sessionKey, runId: event.runId ?? ctx.runId });
-    });
-
     api.on("subagent_ended", async (event, ctx) => {
       await runtime.subagentEnded(event, ctx);
     });
