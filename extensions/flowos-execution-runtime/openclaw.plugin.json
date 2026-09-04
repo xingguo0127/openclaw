@@ -10,7 +10,8 @@
       "flowos_execution_stage",
       "flowos_execution_spawn",
       "flowos_execution_complete",
-      "flowos_execution_fail"
+      "flowos_execution_fail",
+      "flowos_image_generate"
     ]
   },
   "configSchema": {

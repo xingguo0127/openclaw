@@ -2,7 +2,7 @@
   "name": "@openclaw/flowos-execution-runtime",
   "version": "2026.8.11",
   "private": true,
-  "description": "Bind FlowOS long-task Execution tools to OpenClaw subagent runs",
+  "description": "Bind trusted FlowOS execution and paid capability tools to OpenClaw runs",
   "type": "module",
   "dependencies": {
     "typebox": "1.1.39"
