@@ -7,6 +7,8 @@ const context: OpenClawPluginToolContext = {
   agentId: "main",
   sessionKey: "agent:main:main",
   sessionId: "conversation-1",
+  runId: "run-1",
+  trigger: "user",
 };
 
 afterEach(() => vi.unstubAllEnvs());
@@ -41,7 +43,6 @@ describe("FlowOS image generation private tool", () => {
     const inject = vi.fn(async () => ({ ok: true as const }));
     const nodeSend = vi.fn();
     const runs = new ImageGenerationRunStore();
-    runs.begin({ ...context, runId: "run-1", trigger: "user" });
     const tool = createImageGenerationTool({
       context,
       request,
@@ -78,20 +79,18 @@ describe("FlowOS image generation private tool", () => {
     };
     const inject = vi.fn(async () => ({ ok: true as const }));
     const runs = new ImageGenerationRunStore();
-    const tool = createImageGenerationTool({
-      context,
-      request,
-      runs,
-      ownerAgentId: "agent:main",
-      inject,
-    });
+    const toolForRun = (runId: string) =>
+      createImageGenerationTool({
+        context: { ...context, runId },
+        request,
+        runs,
+        ownerAgentId: "agent:main",
+        inject,
+      });
     vi.stubEnv("ASSIST_API_BASE", "https://attacker.example");
 
-    runs.begin({ ...context, runId: "run-1", trigger: "user" });
-    await tool.execute("call-1", { prompt: "第一轮" });
-    runs.end({ sessionKey: context.sessionKey, runId: "run-1" });
-    runs.begin({ ...context, runId: "run-2", trigger: "user" });
-    await tool.execute("call-2", { prompt: "第二轮" });
+    await toolForRun("run-1").execute("call-1", { prompt: "第一轮" });
+    await toolForRun("run-2").execute("call-2", { prompt: "第二轮" });
 
     expect(keys[0]).not.toBe(keys[1]);
   });
@@ -101,27 +100,23 @@ describe("FlowOS image generation private tool", () => {
     const inject = vi.fn(async () => ({ ok: true as const }));
     const nodeSend = vi.fn();
     const runs = new ImageGenerationRunStore();
-    const tool = createImageGenerationTool({
-      context,
-      request,
-      runs,
-      ownerAgentId: "agent:main",
-      inject,
-      nodeSend,
-    });
+    const toolForRun = (runId: string) =>
+      createImageGenerationTool({
+        context: { ...context, runId },
+        request,
+        runs,
+        ownerAgentId: "agent:main",
+        inject,
+        nodeSend,
+      });
 
-    runs.begin({ ...context, runId: "run-1", trigger: "user" });
-    await tool.execute("attempt-1", { prompt: "一只猫" });
-    runs.end({ sessionKey: context.sessionKey, runId: "run-1" });
-    runs.begin({ ...context, runId: "run-1", trigger: "user" });
-    await tool.execute("attempt-2", { prompt: "一只猫" });
+    await toolForRun("run-1").execute("attempt-1", { prompt: "一只猫" });
+    await toolForRun("run-1").execute("attempt-2", { prompt: "一只猫" });
 
     expect(inject).toHaveBeenCalledOnce();
     expect(nodeSend).toHaveBeenCalledOnce();
 
-    runs.end({ sessionKey: context.sessionKey, runId: "run-1" });
-    runs.begin({ ...context, runId: "run-2", trigger: "user" });
-    await tool.execute("next-run", { prompt: "另一只猫" });
+    await toolForRun("run-2").execute("next-run", { prompt: "另一只猫" });
 
     expect(inject).toHaveBeenCalledTimes(2);
     expect(nodeSend).toHaveBeenCalledTimes(2);
@@ -130,33 +125,29 @@ describe("FlowOS image generation private tool", () => {
   it("fails closed for non-user runs even on the owner session", async () => {
     const request = vi.fn(async () => succeeded());
     const runs = new ImageGenerationRunStore();
+    const inject = vi.fn(async () => ({ ok: true as const }));
     const tool = createImageGenerationTool({
-      context,
+      context: { ...context, runId: "run-heartbeat", trigger: "heartbeat" },
       request,
       runs,
       ownerAgentId: "agent:main",
-      inject: vi.fn(async () => ({ ok: true as const })),
+      inject,
     });
 
-    runs.begin({ ...context, runId: "run-user", trigger: "user" });
-    runs.begin({ ...context, runId: "run-heartbeat", trigger: "heartbeat" });
-
     await expect(tool.execute("background-call", { prompt: "后台生成" })).rejects.toThrow(
-      "active trusted user turn",
+      "trusted owner session",
     );
     expect(request).not.toHaveBeenCalled();
   });
 
   it("fails closed without the active owner run", async () => {
     const tool = createImageGenerationTool({
-      context,
+      context: { ...context, runId: undefined },
       request: vi.fn(async () => succeeded()),
       runs: new ImageGenerationRunStore(),
       ownerAgentId: "agent:main",
       inject: vi.fn(async () => ({ ok: true as const })),
     });
-    await expect(tool.execute("call-1", { prompt: "猫" })).rejects.toThrow(
-      "active trusted user turn",
-    );
+    await expect(tool.execute("call-1", { prompt: "猫" })).rejects.toThrow("trusted owner session");
   });
 });

@@ -44,6 +44,19 @@ describe("openclaw plugin tool context", () => {
     expect(result.context.sessionId).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
   });
 
+  it("forwards runtime-owned run identity and trigger", () => {
+    const result = resolveOpenClawPluginToolInputs({
+      options: {
+        config: {} as never,
+        runId: "run-1",
+        trigger: "user",
+      },
+    });
+
+    expect(result.context.runId).toBe("run-1");
+    expect(result.context.trigger).toBe("user");
+  });
+
   it("forwards runtime-owned active model metadata", () => {
     const result = resolveOpenClawPluginToolInputs({
       options: {

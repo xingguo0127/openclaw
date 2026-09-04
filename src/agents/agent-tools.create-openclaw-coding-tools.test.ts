@@ -587,7 +587,7 @@ describe("createOpenClawCodingTools", () => {
     expect(createOpenClawToolsMock).not.toHaveBeenCalled();
   });
 
-  it("forwards active model metadata to plugin-only tool construction", () => {
+  it("forwards active model and run metadata to plugin-only tool construction", () => {
     const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
     createOpenClawToolsMock.mockClear();
     const resolvePluginToolsSpy = vi
@@ -601,6 +601,8 @@ describe("createOpenClawCodingTools", () => {
         runtimeToolAllowlist: ["memory_search"],
         modelProvider: "openrouter",
         modelId: "openrouter/auto",
+        runId: "run-user-1",
+        trigger: "user",
         toolConstructionPlan: {
           includeBaseCodingTools: false,
           includeShellTools: false,
@@ -615,6 +617,8 @@ describe("createOpenClawCodingTools", () => {
       const pluginToolOptions = resolvePluginToolsSpy.mock.calls[0]?.[0].options;
       expect(pluginToolOptions?.modelProvider).toBe("openrouter");
       expect(pluginToolOptions?.modelId).toBe("openrouter/auto");
+      expect(pluginToolOptions?.runId).toBe("run-user-1");
+      expect(pluginToolOptions?.trigger).toBe("user");
     } finally {
       resolvePluginToolsSpy.mockRestore();
     }
