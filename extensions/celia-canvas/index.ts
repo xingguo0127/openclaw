@@ -8,11 +8,6 @@ type NodeSendFn = (sessionKey: string, event: string, payload: unknown) => void;
 const getNodeSend = (): NodeSendFn | undefined =>
   (globalThis as Record<PropertyKey, unknown>)[NODE_SEND_KEY] as NodeSendFn | undefined;
 
-// ctx.sessionKey 格式为 "agent:agentId:sessionId"（如 "agent:main:main"）
-// Node 客户端订阅时使用短 key（如 "main"），需要去掉 "agent:xxx:" 前缀
-const toNodeSessionKey = (sessionKey: string | undefined): string =>
-  sessionKey?.replace(/^agent:[^:]+:/, "") ?? "main";
-
 // ─────────────────────────────────────────────────────────────
 // push_card 延迟推送：staging 双索引 Map
 //
@@ -163,7 +158,9 @@ export default definePluginEntry({
               }
               const nodeSend = getNodeSend();
               if (nodeSend) {
-                nodeSend(toNodeSessionKey(fbKey), "canvas.card.push", { cardJson: fbCardJson });
+                // Node subscriptions use the canonical agent-prefixed key. Stripping the
+                // prefix silently drops live cards because session fanout is exact-match.
+                nodeSend(fbKey, "canvas.card.push", { cardJson: fbCardJson });
               }
               void injectMessageBySessionKey(fbKey, `[celia_card]${fbCardJson}`).catch((err) => {
                 api.logger.error(`[celia-canvas] fallback inject failed: ${String(err)}`);
@@ -291,13 +288,12 @@ export default definePluginEntry({
 
       // flush：按 anchor 顺序 nodeSend WS + injectMessageBySessionKey transcript
       const nodeSend = getNodeSend();
-      const nodeKey = toNodeSessionKey(sessionKey);
       const flushedSummary = groups.map((g) => `anchor#${g.anchor}=[${g.cards.length}]`).join(",");
       api.logger.info(`[celia-canvas] llm_output flush: ${flushedSummary || "(empty)"}`);
       for (const g of groups) {
         for (const { cardJson } of g.cards) {
           if (nodeSend) {
-            nodeSend(nodeKey, "canvas.card.push", { cardJson, anchorTextIndex: g.anchor });
+            nodeSend(sessionKey, "canvas.card.push", { cardJson, anchorTextIndex: g.anchor });
           }
           void injectMessageBySessionKey(sessionKey, `[celia_card]${cardJson}`).catch((err) => {
             api.logger.error(`[celia-canvas] transcript inject failed: ${String(err)}`);
