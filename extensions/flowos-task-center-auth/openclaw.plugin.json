@@ -6,7 +6,7 @@
   },
   "contracts": {
     "gatewayMethodDispatch": ["authenticated-request"],
-    "tools": ["proactive_concern"]
+    "tools": ["proactive_concern", "resolve_secretary_observation"]
   },
   "configSchema": {
     "type": "object",

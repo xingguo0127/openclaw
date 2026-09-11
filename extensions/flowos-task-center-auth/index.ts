@@ -42,6 +42,7 @@ const knownCredentialNames = [
 ] as const;
 
 const proactiveConcernToolName = "proactive_concern";
+const secretaryObservationToolName = "resolve_secretary_observation";
 const proactiveAssistDefault = "http://127.0.0.1:18790";
 const proactiveAssistHosts = new Set(["127.0.0.1", "assist"]);
 const proactiveMaxResponseBytes = 1_000_000;
@@ -50,6 +51,7 @@ const proactiveSafeValidationFields = new Set([
   "draftId",
   "capabilityId",
   "title",
+  "intent",
   "contextRef",
   "parameters",
   "conditions",
@@ -65,6 +67,11 @@ const proactiveSafeValidationFields = new Set([
 type ProactiveConcernParams = {
   action: "catalog" | "compile";
   draft?: Record<string, unknown>;
+};
+
+type SecretaryObservationParams = {
+  batchId: string;
+  decisions: Array<Record<string, unknown>>;
 };
 
 export function resolveTrustedAssistEndpoint(value: unknown): URL | null {
@@ -250,6 +257,103 @@ export function createProactiveConcernTool(
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : "proactive Concern request failed";
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: message }) }],
+          details: { error: message },
+        };
+      }
+    },
+  };
+}
+
+export function createSecretaryObservationTool(
+  endpoint: URL | null,
+  token: string,
+  requester: ProactiveConcernRequester = requestProactiveConcern,
+) {
+  return {
+    name: secretaryObservationToolName,
+    label: "提交秘书观察决定",
+    description:
+      "提交一个完整的秘书观察批次决定。每个 observation 必须且只能处理一次；" +
+      "可保留原通知、用 Agent 判断替换原通知，或声明命中一份用户已确认的 Watcher 合同。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        batchId: { type: "string", minLength: 1, maxLength: 160 },
+        decisions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 50,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              observationIds: {
+                type: "array",
+                minItems: 1,
+                maxItems: 50,
+                items: { type: "string", minLength: 1, maxLength: 200 },
+              },
+              action: {
+                type: "string",
+                enum: ["leave_original", "replace_original", "watcher_triggered"],
+              },
+              contractId: { type: "string", maxLength: 160 },
+              title: { type: "string", maxLength: 500 },
+              body: { type: "string", maxLength: 4000 },
+              reason: { type: "string", maxLength: 1000 },
+              actions: {
+                type: "array",
+                maxItems: 2,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    id: { type: "string", minLength: 1, maxLength: 40 },
+                    label: { type: "string", minLength: 1, maxLength: 16 },
+                    kind: { type: "string", enum: ["open_case", "open_app"] },
+                    primary: { type: "boolean" },
+                  },
+                  required: ["id", "label", "kind"],
+                },
+              },
+            },
+            required: ["observationIds", "action"],
+          },
+        },
+      },
+      required: ["batchId", "decisions"],
+    },
+    async execute(_toolCallId: string, params: SecretaryObservationParams) {
+      try {
+        if (!endpoint || !token) {
+          throw new Error("secretary observation service is not configured");
+        }
+        if (!/^secretary-[a-f0-9]{24}$/.test(params.batchId)) {
+          throw new Error("invalid secretary observation batch id");
+        }
+        if (!Array.isArray(params.decisions) || params.decisions.length === 0) {
+          throw new Error("secretary observation decisions are required");
+        }
+        const payload = { decisions: params.decisions };
+        if (Buffer.byteLength(JSON.stringify(payload), "utf8") > proactiveMaxResponseBytes) {
+          throw new Error("secretary observation decision exceeds 1,000,000 UTF-8 bytes");
+        }
+        const result = await requester(
+          endpoint,
+          token,
+          "POST",
+          `/api/proactive/secretary/observations/${encodeURIComponent(params.batchId)}/resolve`,
+          payload,
+        );
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          details: result,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "secretary observation failed";
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ error: message }) }],
           details: { error: message },
@@ -698,6 +802,9 @@ export default definePluginEntry({
     const proactiveToken = normalizedString(process.env.PROACTIVE_AGENT_TOKEN);
     api.registerTool(() => createProactiveConcernTool(proactiveEndpoint, proactiveToken), {
       name: proactiveConcernToolName,
+    });
+    api.registerTool(() => createSecretaryObservationTool(proactiveEndpoint, proactiveToken), {
+      name: secretaryObservationToolName,
     });
     const bindings = api.runtime.state.openKeyedStore<DeviceEventBinding>({
       namespace: bindingsNamespace,

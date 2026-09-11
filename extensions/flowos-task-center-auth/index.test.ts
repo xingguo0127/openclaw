@@ -23,6 +23,7 @@ vi.mock("openclaw/plugin-sdk/device-bootstrap", () => ({
 }));
 import plugin, {
   createProactiveConcernTool,
+  createSecretaryObservationTool,
   requestProactiveConcern,
   resolveTrustedAssistEndpoint,
 } from "./index.js";
@@ -122,7 +123,7 @@ describe("proactive Concern runtime tool", () => {
     process.env.ASSIST_API_BASE = "http://assist:18790";
     process.env.PROACTIVE_AGENT_TOKEN = "runtime-owned-token";
     const { toolCalls } = setup();
-    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls).toHaveLength(2);
     const [factory, options] = toolCalls[0];
     const tool = factory({});
     expect(options).toEqual({ name: "proactive_concern" });
@@ -135,6 +136,27 @@ describe("proactive Concern runtime tool", () => {
       },
       required: ["action"],
     });
+  });
+
+  it("submits secretary decisions through the captured Assist endpoint", async () => {
+    const endpoint = resolveTrustedAssistEndpoint("http://assist:18790");
+    const requester = vi.fn(async () => ({ ok: true, batchId: "secretary-abc" }));
+    const tool = createSecretaryObservationTool(endpoint, "captured-token", requester);
+    const decisions = [{ observationIds: ["notification:v1:test"], action: "leave_original" }];
+
+    const result = await tool.execute("call-2", {
+      batchId: "secretary-0123456789abcdef01234567",
+      decisions,
+    });
+
+    expect(requester).toHaveBeenCalledWith(
+      endpoint,
+      "captured-token",
+      "POST",
+      "/api/proactive/secretary/observations/secretary-0123456789abcdef01234567/resolve",
+      { decisions },
+    );
+    expect(result.details).toMatchObject({ ok: true });
   });
 
   it("uses its captured endpoint and token and decorates test-only compile results", async () => {
