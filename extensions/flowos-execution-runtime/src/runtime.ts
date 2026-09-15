@@ -199,6 +199,45 @@ export class FlowosExecutionRuntime {
     this.markTerminal(failed);
   }
 
+  async cancelExecution(executionId: string): Promise<ActiveExecution> {
+    const initial = await this.client.detail(executionId);
+    const attemptId = initial.currentAttemptId;
+    if (!attemptId) {
+      throw new Error("FlowOS Execution has no active Attempt");
+    }
+    let childSessionKey: string | undefined;
+    const cancelled = await this.locks.run(executionId, attemptId, async () => {
+      const current = await this.client.detail(executionId);
+      if (current.currentAttemptId !== attemptId) {
+        throw new Error("FlowOS Execution Attempt changed before cancellation");
+      }
+      const item = await this.client.cancel(executionId, current.version);
+      const binding = await this.bindings.byExecution(executionId, attemptId);
+      if (binding && !terminal(binding)) {
+        childSessionKey = binding.childSessionKey;
+        const stopped: RunBinding = {
+          ...binding,
+          status: "ENDED_ERROR",
+          outcome: "killed",
+          updatedAt: Date.now(),
+        };
+        await this.bindings.save(stopped);
+        this.markTerminal(stopped);
+      }
+      return item;
+    });
+    if (childSessionKey) {
+      await this.subagent
+        .deleteSession({ sessionKey: childSessionKey, deleteTranscript: false })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `FlowOS Execution worker stop failed for ${executionId}: ${error instanceof Error ? error.message : "error"}`,
+          );
+        });
+    }
+    return cancelled;
+  }
+
   async prepareAndCompleteResult(
     binding: RunBinding,
     params: {
@@ -398,6 +437,7 @@ export class FlowosExecutionRuntime {
               expectedVersion: detail.version,
               stageKey: "validating",
               stageLabel: "正在验证结果",
+              progress: 0.95,
             });
             syncedVersion = validating.version;
           }

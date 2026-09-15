@@ -191,6 +191,8 @@ function fakeClient(options?: {
       };
     } else if (path.endsWith("/fail")) {
       item = { ...item, status: "FAILED", version: item.version + 1, stageKey: "failed" };
+    } else if (path.endsWith("/cancel")) {
+      item = { ...item, status: "CANCELLED", version: item.version + 1, stageKey: "cancelled" };
     }
     await options?.afterRequest?.(method, path, payload);
     return item;
@@ -534,6 +536,7 @@ describe("FlowOS Execution plugin boundaries", () => {
           system: fakeSystem(),
         },
         registerTool: vi.fn(),
+        registerGatewayMethod: vi.fn(),
         on: vi.fn(),
         logger: { warn: vi.fn(), info: vi.fn() },
       } as never),
@@ -544,6 +547,7 @@ describe("FlowOS Execution plugin boundaries", () => {
     process.env.FLOWOS_TASK_CENTER_JWT_SECRET = "m".repeat(64);
     process.env.ASSIST_API_BASE = "http://assist:18790";
     const registerTool = vi.fn();
+    const registerGatewayMethod = vi.fn();
     const on = vi.fn();
     plugin.register({
       runtime: {
@@ -552,6 +556,7 @@ describe("FlowOS Execution plugin boundaries", () => {
         system: fakeSystem(),
       },
       registerTool,
+      registerGatewayMethod,
       on,
       logger: { warn: vi.fn(), info: vi.fn() },
     } as never);
@@ -562,6 +567,7 @@ describe("FlowOS Execution plugin boundaries", () => {
       workspaceDir: "/tmp/workspace",
     });
     expect(registered).toHaveLength(6);
+    expect(registerGatewayMethod.mock.calls[0]?.[0]).toBe("flowos.execution.cancel");
     expect(on.mock.calls.map((call) => call[0])).toEqual(["subagent_ended", "gateway_start"]);
   });
 
@@ -1229,6 +1235,49 @@ describe("FlowOS Execution plugin boundaries", () => {
     expect(assist.calls.findLast((call) => call.path.endsWith("/stage"))?.payload).toMatchObject({
       expectedVersion: 2,
       stageKey: "next",
+    });
+  });
+
+  it("fences Assist before stopping the bound worker on user cancellation", async () => {
+    const assist = fakeClient();
+    assist.setItem({ status: "RUNNING", version: 3, stageKey: "generating" });
+    const bindings = new RunBindingStore(memoryStore());
+    const subagent = fakeSubagent();
+    const runtime = new FlowosExecutionRuntime(
+      assist.client,
+      bindings,
+      subagent as never,
+      fakeSystem() as never,
+      vi.fn(),
+      { warn: vi.fn(), info: vi.fn() },
+      new ExecutionLocks(),
+    );
+    await bindings.save({
+      executionId: "execution-1",
+      attemptId: "attempt-1",
+      requesterSessionKey: "agent:main:main",
+      ownerAgentId: "agent:main",
+      targetAgentId: "main",
+      childSessionKey: "agent:main:subagent:flowos-1",
+      runId: "run-1",
+      status: "RUNNING",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const cancelled = await runtime.cancelExecution("execution-1");
+
+    expect(cancelled.status).toBe("CANCELLED");
+    expect(assist.calls.find((call) => call.path.endsWith("/cancel"))?.payload).toEqual({
+      expectedVersion: 3,
+    });
+    expect(subagent.deleteSession).toHaveBeenCalledWith({
+      sessionKey: "agent:main:subagent:flowos-1",
+      deleteTranscript: false,
+    });
+    expect(await bindings.byExecution("execution-1", "attempt-1")).toMatchObject({
+      status: "ENDED_ERROR",
+      outcome: "killed",
     });
   });
 

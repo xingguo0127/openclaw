@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { injectMessageBySessionKey } from "openclaw/plugin-sdk/celia-card-inject";
+import type { GatewayRequestHandlerOptions } from "openclaw/plugin-sdk/gateway-runtime";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { RunBindingStore } from "./src/bindings.js";
 import {
@@ -26,6 +27,20 @@ type NodeSend = (sessionKey: string, event: string, payload: unknown) => void;
 
 function getNodeSend(): NodeSend | undefined {
   return (globalThis as Record<PropertyKey, unknown>)[nodeSendKey] as NodeSend | undefined;
+}
+
+function trustedOperator(client: GatewayRequestHandlerOptions["client"]): boolean {
+  return Boolean(
+    client?.isDeviceTokenAuth && client.connect.role === "operator" && client.connect.device?.id,
+  );
+}
+
+function reject(
+  respond: GatewayRequestHandlerOptions["respond"],
+  code: string,
+  message: string,
+): void {
+  respond(false, undefined, { code, message });
 }
 
 type ResultCardParams = {
@@ -188,6 +203,39 @@ export default definePluginEntry({
           "space_artifact_publish",
         ],
       },
+    );
+
+    api.registerGatewayMethod(
+      "flowos.execution.cancel",
+      async ({ params, client: gatewayClient, respond }) => {
+        if (!trustedOperator(gatewayClient)) {
+          reject(respond, "INVALID_REQUEST", "paired operator device authentication required");
+          return;
+        }
+        const input = params ?? {};
+        const executionId = typeof input.executionId === "string" ? input.executionId.trim() : "";
+        if (
+          Object.keys(input).toSorted().join(",") !== "executionId" ||
+          !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(executionId)
+        ) {
+          reject(respond, "INVALID_REQUEST", "valid executionId is required");
+          return;
+        }
+        try {
+          const item = await runtime.cancelExecution(executionId);
+          respond(true, {
+            executionId: item.executionId,
+            status: item.status,
+            version: item.version,
+          });
+        } catch (error) {
+          api.logger.warn(
+            `FlowOS Execution cancellation failed for ${executionId}: ${error instanceof Error ? error.message : "error"}`,
+          );
+          reject(respond, "EXECUTION_CANCEL_FAILED", "execution cancellation failed");
+        }
+      },
+      { scope: "operator.write" },
     );
 
     api.on("subagent_ended", async (event, ctx) => {
