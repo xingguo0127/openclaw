@@ -17,6 +17,8 @@ export type SubagentRunParams = {
   lightContext?: boolean;
   deliver?: boolean;
   idempotencyKey?: string;
+  /** Hard deadline for this plugin-owned run. Zero keeps the configured no-timeout behavior. */
+  runTimeoutSeconds?: number;
 };
 
 export type SubagentRunResult = {

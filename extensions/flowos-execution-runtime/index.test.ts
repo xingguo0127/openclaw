@@ -813,6 +813,9 @@ describe("FlowOS Execution plugin boundaries", () => {
         workspaceDir: "/trusted/workspace",
       },
     });
+    expect(owner.subagent.run).toHaveBeenCalledWith(
+      expect.objectContaining({ runTimeoutSeconds: 30 * 60 }),
+    );
     await spawnRoutebook(owner);
     expect(owner.subagent.run).toHaveBeenCalledOnce();
     await expect(

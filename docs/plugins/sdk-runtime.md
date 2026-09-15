@@ -216,6 +216,7 @@ two-party event loops that do not go through the shared inbound reply runner.
       message: "Expand this query into focused follow-up searches.",
       provider: "openai", // optional override
       model: "gpt-4.1-mini", // optional override
+      runTimeoutSeconds: 900, // optional hard deadline; 0 means no timeout
       deliver: false,
     });
 
@@ -233,6 +234,8 @@ two-party event loops that do not go through the shared inbound reply runner.
       sessionKey: "agent:main:subagent:search-helper",
     });
     ```
+
+    `runTimeoutSeconds` sets a hard deadline for the plugin-owned run and its subagent lifecycle record. Omit it to use the host default; `0` keeps the no-timeout behavior.
 
     <Warning>
     Model overrides (`provider`/`model`) require operator opt-in via `plugins.entries.<id>.subagent.allowModelOverride: true` in config. Untrusted plugins can still run subagents, but override requests are rejected.

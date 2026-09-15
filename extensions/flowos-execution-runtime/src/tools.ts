@@ -21,6 +21,7 @@ import type { SpaceArtifactValidation } from "./validation.js";
 
 const activeStatuses = new Set(["QUEUED", "PLANNING", "RUNNING", "AWAITING_USER", "PAUSED"]);
 const plannedRoutebookTaskKind = "ROUTEBOOK_GENERATION";
+const routebookRunTimeoutSeconds = 30 * 60;
 const errorCodes = [
   "AUTHORIZATION_DENIED",
   "GRANT_EXPIRED",
@@ -438,6 +439,9 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
             lightContext: true,
             lane: `flowos-execution:${params.executionId}`,
             idempotencyKey: runId,
+            ...(current.taskKind === plannedRoutebookTaskKind && {
+              runTimeoutSeconds: routebookRunTimeoutSeconds,
+            }),
           });
         } catch (error) {
           const pending: RunBinding = {

@@ -3295,6 +3295,7 @@ describe("gateway agent handler", () => {
           message: "background plugin subagent task",
           sessionKey: childSessionKey,
           idempotencyKey: runId,
+          timeout: 1_800,
         },
         {
           context,
@@ -3336,6 +3337,7 @@ describe("gateway agent handler", () => {
         cleanup: "keep",
         spawnMode: "run",
         label: "plugin:memory-core",
+        runTimeoutSeconds: 1_800,
       });
       expectRecordFields(run.completion, { required: false });
       expectRecordFields(run.delivery, { status: "not_required" });
