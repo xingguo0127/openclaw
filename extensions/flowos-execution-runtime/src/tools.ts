@@ -143,7 +143,7 @@ async function requireStageBinding(
 async function requireCurrentExecution(
   deps: ToolDeps,
   binding: RunBinding,
-  expectedVersion: number,
+  expectedVersion?: number,
 ): Promise<ActiveExecution> {
   const detail = await deps.client.detail(binding.executionId);
   if (
@@ -153,7 +153,7 @@ async function requireCurrentExecution(
   ) {
     throw new Error("FlowOS Execution is no longer active for this binding");
   }
-  if (expectedVersion !== detail.version) {
+  if (expectedVersion !== undefined && expectedVersion !== detail.version) {
     throw new Error("expectedVersion does not match the current FlowOS Execution");
   }
   return detail;
@@ -276,7 +276,6 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
       {
         executionId: Type.String({ minLength: 1, maxLength: 128 }),
         attemptId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-        expectedVersion: Type.Integer({ minimum: 1 }),
         stageKey: Type.String({ minLength: 1, maxLength: 64 }),
         stageLabel: Type.String({ minLength: 1, maxLength: 120 }),
         progress: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
@@ -287,7 +286,6 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
       const params = args as {
         executionId: string;
         attemptId?: string;
-        expectedVersion: number;
         stageKey: string;
         stageLabel: string;
         progress?: number;
@@ -299,7 +297,9 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
       }
       return await deps.locks.run(params.executionId, lockAttemptId, async () => {
         const binding = await requireStageBinding(deps, params.executionId, params.attemptId);
-        const current = await requireCurrentExecution(deps, binding, params.expectedVersion);
+        // The plugin serializes stage writers and resolves the live version here.
+        // Agent prompts must not carry a CAS token that expires after their first update.
+        const current = await requireCurrentExecution(deps, binding);
         const latestBinding = await deps.bindings.byExecution(
           binding.executionId,
           binding.attemptId,
@@ -431,7 +431,7 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
           run = await deps.api.runtime.subagent.run({
             sessionKey: childKey,
             message:
-              `[FlowOS Execution]\nexecutionId=${params.executionId}\nattemptId=${params.attemptId}\nexpectedVersion=${detail.version}\n` +
+              `[FlowOS Execution]\nexecutionId=${params.executionId}\nattemptId=${params.attemptId}\n` +
               "Only report structured progress with flowos_execution_stage. Do not complete or fail the Execution.\n\n" +
               params.task,
             deliver: false,

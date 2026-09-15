@@ -582,6 +582,9 @@ describe("FlowOS Execution plugin boundaries", () => {
       expect(schema).not.toContain("userId");
       expect(schema).not.toContain("tenantId");
     }
+    expect(JSON.stringify(byName.get("flowos_execution_stage")?.parameters)).not.toContain(
+      "expectedVersion",
+    );
   });
 
   it("start derives owner and requester then replays without cross-session adoption", async () => {
@@ -684,15 +687,25 @@ describe("FlowOS Execution plugin boundaries", () => {
     });
     await child.byName.get("flowos_execution_stage")?.execute("stage", {
       executionId: "execution-1",
-      expectedVersion: 1,
       stageKey: "generating",
       stageLabel: "正在生成",
     });
     expect(assist.getItem()).toMatchObject({ status: "RUNNING", version: 2 });
+    await child.byName.get("flowos_execution_stage")?.execute("stage-2", {
+      executionId: "execution-1",
+      stageKey: "validating",
+      stageLabel: "正在校验",
+    });
+    expect(assist.getItem()).toMatchObject({ status: "RUNNING", version: 3 });
+    expect(
+      assist.calls.filter((call) => call.path.endsWith("/stage")).map((call) => call.payload),
+    ).toEqual([
+      expect.objectContaining({ expectedVersion: 1, stageKey: "generating" }),
+      expect.objectContaining({ expectedVersion: 2, stageKey: "validating" }),
+    ]);
     await expect(
       child.byName.get("flowos_execution_stage")?.execute("cross", {
         executionId: "execution-other",
-        expectedVersion: 2,
         stageKey: "bad",
         stageLabel: "bad",
       }),
@@ -732,7 +745,7 @@ describe("FlowOS Execution plugin boundaries", () => {
     expect(subagent.run).toHaveBeenCalledWith(
       expect.objectContaining({
         deliver: false,
-        message: expect.stringContaining("expectedVersion=1"),
+        message: expect.not.stringContaining("expectedVersion"),
       }),
     );
     await owner.byName.get("flowos_execution_spawn")?.execute("spawn-replay", {
@@ -771,7 +784,6 @@ describe("FlowOS Execution plugin boundaries", () => {
     await child.byName.get("flowos_execution_stage")?.execute("child-stage", {
       executionId: "execution-1",
       attemptId: "attempt-1",
-      expectedVersion: 1,
       stageKey: "collecting",
       stageLabel: "正在收集素材",
     });
@@ -1064,7 +1076,6 @@ describe("FlowOS Execution plugin boundaries", () => {
       owner.byName.get("flowos_execution_stage")?.execute("owner-stage", {
         executionId: "execution-1",
         attemptId: "attempt-1",
-        expectedVersion: 2,
         stageKey: "other",
         stageLabel: "其他阶段",
       }),
@@ -1199,7 +1210,7 @@ describe("FlowOS Execution plugin boundaries", () => {
     expect(owner.validateArtifact).not.toHaveBeenCalled();
   });
 
-  it("rejects stale and future writer versions without changing state", async () => {
+  it("resolves the live stage version inside the serialized plugin boundary", async () => {
     const assist = fakeClient();
     const owner = tools({ client: assist.client });
     await startExecution(owner.byName);
@@ -1208,27 +1219,17 @@ describe("FlowOS Execution plugin boundaries", () => {
       stageKey: "runtime-stage",
       stageLabel: "运行时已推进",
     });
-    await expect(
-      owner.byName.get("flowos_execution_stage")?.execute("stale", {
-        executionId: "execution-1",
-        attemptId: "attempt-1",
-        expectedVersion: 1,
-        stageKey: "stale",
-        stageLabel: "错误旧阶段",
-      }),
-    ).rejects.toThrow("does not match");
-    expect(assist.getItem()).toMatchObject({ version: 2, stageKey: "runtime-stage" });
-
-    await expect(
-      owner.byName.get("flowos_execution_stage")?.execute("future", {
-        executionId: "execution-1",
-        attemptId: "attempt-1",
-        expectedVersion: 99,
-        stageKey: "future",
-        stageLabel: "错误未来版本",
-      }),
-    ).rejects.toThrow("does not match");
-    expect(assist.getItem()).toMatchObject({ version: 2, stageKey: "runtime-stage" });
+    await owner.byName.get("flowos_execution_stage")?.execute("next", {
+      executionId: "execution-1",
+      attemptId: "attempt-1",
+      stageKey: "next",
+      stageLabel: "继续执行",
+    });
+    expect(assist.getItem()).toMatchObject({ version: 3, stageKey: "next" });
+    expect(assist.calls.findLast((call) => call.path.endsWith("/stage"))?.payload).toMatchObject({
+      expectedVersion: 2,
+      stageKey: "next",
+    });
   });
 
   it("complete registers the bound Space Artifact before completing the owner Execution", async () => {
@@ -1380,7 +1381,6 @@ describe("FlowOS Execution plugin boundaries", () => {
       owner.byName.get("flowos_execution_stage")?.execute("late-owner-stage", {
         executionId: "execution-1",
         attemptId: "attempt-1",
-        expectedVersion: 2,
         stageKey: "late",
         stageLabel: "迟到阶段",
       }),
@@ -1693,7 +1693,6 @@ describe("FlowOS Execution typed hooks", () => {
     await validationEntered;
     const lateStage = child.byName.get("flowos_execution_stage")!.execute("late-stage", {
       executionId: "execution-1",
-      expectedVersion: 1,
       stageKey: "late",
       stageLabel: "迟到阶段",
     });
