@@ -729,11 +729,7 @@ export abstract class MemoryManagerSyncOps {
     }
     let transactionStarted = false;
     try {
-      const rows = sourceDb
-        .prepare(
-          `SELECT provider, model, provider_key, hash, embedding, dims, updated_at FROM ${EMBEDDING_CACHE_TABLE}`,
-        )
-        .iterate() as IterableIterator<{
+      type CacheRow = {
         provider: string;
         model: string;
         provider_key: string;
@@ -741,37 +737,50 @@ export abstract class MemoryManagerSyncOps {
         embedding: string;
         dims: number | null;
         updated_at: number;
-      }>;
+      };
       let rowCount = 0;
       let insert: ReturnType<DatabaseSync["prepare"]> | null = null;
-      for (const row of rows) {
-        if (!insert) {
-          insert = this.db.prepare(
-            `INSERT INTO ${EMBEDDING_CACHE_TABLE} (provider, model, provider_key, hash, embedding, dims, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(provider, model, provider_key, hash) DO UPDATE SET
-               embedding=excluded.embedding,
-               dims=excluded.dims,
-               updated_at=excluded.updated_at`,
+      // node:sqlite iterators can outlive their statement after an await/GC.
+      // Materialize bounded batches synchronously; never hold a native iterator across a yield.
+      const batchSize = 1000;
+      for (;;) {
+        const rows = sourceDb
+          .prepare(
+            `SELECT provider, model, provider_key, hash, embedding, dims, updated_at FROM ${EMBEDDING_CACHE_TABLE}
+           ORDER BY provider, model, provider_key, hash LIMIT ? OFFSET ?`,
+          )
+          .all(batchSize, rowCount) as CacheRow[];
+        if (rows.length === 0) {
+          break;
+        }
+        for (const row of rows) {
+          if (!insert) {
+            insert = this.db.prepare(
+              `INSERT INTO ${EMBEDDING_CACHE_TABLE} (provider, model, provider_key, hash, embedding, dims, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(provider, model, provider_key, hash) DO UPDATE SET
+                 embedding=excluded.embedding,
+                 dims=excluded.dims,
+                 updated_at=excluded.updated_at`,
+            );
+            this.db.exec("BEGIN");
+            transactionStarted = true;
+          }
+          insert.run(
+            row.provider,
+            row.model,
+            row.provider_key,
+            row.hash,
+            row.embedding,
+            row.dims,
+            row.updated_at,
           );
-          this.db.exec("BEGIN");
-          transactionStarted = true;
+          rowCount += 1;
         }
-        insert.run(
-          row.provider,
-          row.model,
-          row.provider_key,
-          row.hash,
-          row.embedding,
-          row.dims,
-          row.updated_at,
-        );
-        rowCount += 1;
-        if (rowCount % 1000 === 0) {
-          await new Promise<void>((resolve) => {
-            setImmediate(resolve);
-          });
+        if (rows.length < batchSize) {
+          break;
         }
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
       if (transactionStarted) {
         this.db.exec("COMMIT");
