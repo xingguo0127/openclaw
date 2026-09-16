@@ -28,6 +28,15 @@ export type AssistRequest = (
   payload?: Record<string, unknown>,
 ) => Promise<Record<string, unknown>>;
 
+export class AssistHttpError extends Error {
+  constructor(
+    readonly status: number,
+    details: string,
+  ) {
+    super(`Assist returned HTTP ${status}${details ? `: ${details}` : ""}`);
+  }
+}
+
 export function resolveTrustedAssistEndpoint(value: unknown): URL | null {
   const raw = typeof value === "string" && value.trim() ? value.trim() : defaultAssistUrl;
   try {
@@ -53,7 +62,7 @@ export function resolveTrustedAssistEndpoint(value: unknown): URL | null {
 export function createAssistRequest(
   endpoint: URL,
   token: string,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; includeErrorDetails?: boolean } = {},
 ): AssistRequest {
   const timeoutMs = options.timeoutMs ?? 15_000;
   return async (method, path, payload) => {
@@ -90,7 +99,10 @@ export function createAssistRequest(
           response.on("end", () => {
             const status = response.statusCode ?? 0;
             if (status < 200 || status >= 300) {
-              reject(new Error(`Assist returned HTTP ${status}`));
+              const details = options.includeErrorDetails
+                ? Buffer.concat(chunks).toString("utf8").slice(0, 6000)
+                : "";
+              reject(new AssistHttpError(status, details));
               return;
             }
             try {

@@ -2,7 +2,9 @@
   "id": "flowos-execution-runtime",
   "activation": {
     "onStartup": false,
-    "onConfigPaths": ["plugins.entries.flowos-execution-runtime"]
+    "onConfigPaths": [
+      "plugins.entries.flowos-execution-runtime"
+    ]
   },
   "contracts": {
     "tools": [
@@ -11,7 +13,10 @@
       "flowos_execution_spawn",
       "flowos_execution_complete",
       "flowos_execution_fail",
-      "flowos_image_generate"
+      "flowos_image_generate",
+      "space_read",
+      "space_material_ingest",
+      "space_artifact_publish"
     ]
   },
   "configSchema": {
