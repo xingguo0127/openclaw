@@ -285,7 +285,7 @@ function tools(params?: {
       (plan) =>
         validateArtifact({
           spaceId: plan.spaceId,
-          filePath: plan.artifactFilePath,
+          filePath: plan.artifactCandidateFilePath,
           artifactType: plan.artifactType,
         }),
     );
@@ -367,7 +367,16 @@ const routebookResultPlan = {
   cardCaption: "路书做好啦，点开看看～",
 };
 
-async function spawnRoutebook(owner: ReturnType<typeof tools>, resultPlan = routebookResultPlan) {
+async function spawnRoutebook(
+  owner: ReturnType<typeof tools>,
+  resultPlan: {
+    spaceId: string;
+    artifactTitle: string;
+    artifactFilePath: string;
+    artifactType: "html" | "markdown";
+    cardCaption: string;
+  } = routebookResultPlan,
+) {
   await owner.byName.get("flowos_execution_spawn")?.execute("spawn", {
     executionId: "execution-1",
     attemptId: "attempt-1",
@@ -810,11 +819,17 @@ describe("FlowOS Execution plugin boundaries", () => {
       status: "RUNNING",
       finalizationPlan: {
         ...routebookResultPlan,
+        artifactCandidateFilePath: expect.stringMatching(
+          /^generated\/\.flowos-[a-f0-9]{16}\.candidate\.html$/,
+        ),
         workspaceDir: "/trusted/workspace",
       },
     });
     expect(owner.subagent.run).toHaveBeenCalledWith(
-      expect.objectContaining({ runTimeoutSeconds: 30 * 60 }),
+      expect.objectContaining({
+        runTimeoutSeconds: 30 * 60,
+        message: expect.stringContaining("artifactCandidatePath="),
+      }),
     );
     await spawnRoutebook(owner);
     expect(owner.subagent.run).toHaveBeenCalledOnce();
@@ -906,7 +921,7 @@ describe("FlowOS Execution plugin boundaries", () => {
 
     expect(owner.validateArtifact).toHaveBeenCalledWith({
       spaceId: unicodeSpaceId,
-      filePath: routebookResultPlan.artifactFilePath,
+      filePath: binding!.finalizationPlan!.artifactCandidateFilePath,
       artifactType: "html",
     });
     expect(assist.calls.filter((call) => call.path.endsWith("/space-artifacts"))).toHaveLength(1);
@@ -930,6 +945,8 @@ describe("FlowOS Execution plugin boundaries", () => {
     const owner = tools({ client: assist.client, validateArtifact, deliverResultCard });
     await startRoutebookExecution(owner.byName);
     await spawnRoutebook(owner);
+    const initial = await owner.bindings.byExecution("execution-1", "attempt-1");
+    await owner.bindings.save({ ...initial!, validationRepairCount: 2 });
     const binding = await owner.bindings.byExecution("execution-1", "attempt-1");
     await owner.runtime.subagentEnded(
       {
@@ -954,6 +971,51 @@ describe("FlowOS Execution plugin boundaries", () => {
     });
   });
 
+  it("resumes the same child to repair a rejected planned routebook before failing", async () => {
+    const assist = fakeClient();
+    let validationAttempts = 0;
+    const validateArtifact = vi.fn<ArtifactValidator>(async () => {
+      validationAttempts += 1;
+      if (validationAttempts === 1) {
+        throw new Error("validator rejected: update the card time");
+      }
+      return { validatorId: "lushu-html-v1", contentSha256: "b".repeat(64) };
+    });
+    const owner = tools({ client: assist.client, validateArtifact });
+    await startRoutebookExecution(owner.byName);
+    await spawnRoutebook(owner);
+    const first = await owner.bindings.byExecution("execution-1", "attempt-1");
+
+    await owner.runtime.subagentEnded(
+      {
+        targetSessionKey: first!.childSessionKey!,
+        targetKind: "subagent",
+        runId: first!.runId,
+        outcome: "ok",
+      },
+      { childSessionKey: first!.childSessionKey },
+    );
+
+    const repair = await owner.bindings.byExecution("execution-1", "attempt-1");
+    expect(repair).toMatchObject({ status: "RUNNING", validationRepairCount: 1 });
+    expect(repair!.runId).not.toBe(first!.runId);
+    expect(owner.subagent.run).toHaveBeenCalledTimes(2);
+    expect(owner.subagent.run.mock.calls[1]?.[0].message).toContain("update the card time");
+    expect(assist.calls.some((call) => call.path.endsWith("/fail"))).toBe(false);
+
+    await owner.runtime.subagentEnded(
+      {
+        targetSessionKey: repair!.childSessionKey!,
+        targetKind: "subagent",
+        runId: repair!.runId,
+        outcome: "ok",
+      },
+      { childSessionKey: repair!.childSessionKey },
+    );
+
+    expect(assist.getItem()).toMatchObject({ status: "SUCCEEDED" });
+  });
+
   it("recovers a lost planned validation failure response after Gateway restart", async () => {
     let loseFailureResponse = true;
     const assist = fakeClient({
@@ -970,6 +1032,8 @@ describe("FlowOS Execution plugin boundaries", () => {
     const owner = tools({ client: assist.client, validateArtifact });
     await startRoutebookExecution(owner.byName);
     await spawnRoutebook(owner);
+    const initial = await owner.bindings.byExecution("execution-1", "attempt-1");
+    await owner.bindings.save({ ...initial!, validationRepairCount: 2 });
     const binding = await owner.bindings.byExecution("execution-1", "attempt-1");
     await owner.runtime.subagentEnded(
       {
@@ -994,7 +1058,12 @@ describe("FlowOS Execution plugin boundaries", () => {
       owner.deliverResultCard,
       { warn: vi.fn(), info: vi.fn() },
       owner.locks,
-      () => validateArtifact(routebookResultPlan),
+      () =>
+        validateArtifact({
+          spaceId: routebookResultPlan.spaceId,
+          filePath: routebookResultPlan.artifactFilePath,
+          artifactType: routebookResultPlan.artifactType,
+        }),
     );
     await restarted.reconcile();
     expect(assist.calls.filter((call) => call.path.endsWith("/fail"))).toHaveLength(1);

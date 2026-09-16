@@ -28,6 +28,7 @@ export type FinalizationPlan = {
   spaceId: string;
   artifactTitle: string;
   artifactFilePath: string;
+  artifactCandidateFilePath: string;
   artifactType: "html" | "markdown";
   cardCaption: string;
 };
@@ -50,6 +51,7 @@ export type RunBinding = {
   status: RunBindingStatus;
   outcome?: string;
   closureWakeCount?: number;
+  validationRepairCount?: number;
   finalizationPlan?: FinalizationPlan;
   finalizationFailure?: FinalizationFailure;
   resultDelivery?: ResultDelivery;

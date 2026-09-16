@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { posix, resolve } from "node:path";
 import { jsonResult } from "openclaw/plugin-sdk/core";
 import type {
   AnyAgentTool,
@@ -78,9 +79,24 @@ function sameFinalizationPlan(
     actual.spaceId === expected.spaceId &&
     actual.artifactTitle === expected.artifactTitle &&
     actual.artifactFilePath === expected.artifactFilePath &&
+    actual.artifactCandidateFilePath === expected.artifactCandidateFilePath &&
     actual.artifactType === expected.artifactType &&
     actual.cardCaption === expected.cardCaption
   );
+}
+
+function candidateArtifactFilePath(filePath: string, attemptId: string): string {
+  const parts = filePath.split("/");
+  if (
+    parts[0] !== "generated" ||
+    parts.length < 2 ||
+    parts.some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new Error("Space Artifact filePath must be a generated relative path");
+  }
+  const extension = posix.extname(filePath);
+  const digest = createHash("sha256").update(attemptId).digest("hex").slice(0, 16);
+  return posix.join(posix.dirname(filePath), `.flowos-${digest}.candidate${extension}`);
 }
 
 function contextAgentId(context: OpenClawPluginToolContext): string {
@@ -370,7 +386,14 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
       const requesterSessionKey = requireOwnerContext(deps.context, deps.ownerAgentId);
       const targetAgentId = normalizeChildAgentId(params.agentId);
       const finalizationPlan = params.resultPlan
-        ? { ...params.resultPlan, workspaceDir: requireWorkspaceDir(deps.context) }
+        ? {
+            ...params.resultPlan,
+            artifactCandidateFilePath: candidateArtifactFilePath(
+              params.resultPlan.artifactFilePath,
+              params.attemptId,
+            ),
+            workspaceDir: requireWorkspaceDir(deps.context),
+          }
         : undefined;
       let rejected: { error: unknown; binding: RunBinding } | undefined;
       const result = await deps.locks.run(params.executionId, params.attemptId, async () => {
@@ -429,12 +452,24 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
         }
         let run: { runId: string };
         try {
+          const plannedOutputContract = finalizationPlan
+            ? "\n\n[FlowOS trusted output contract]\n" +
+              `artifactCandidatePath=${resolve(
+                finalizationPlan.workspaceDir,
+                "spaces",
+                finalizationPlan.spaceId,
+                ...finalizationPlan.artifactCandidateFilePath.split("/"),
+              )}\n` +
+              `artifactFinalPath=${finalizationPlan.artifactFilePath}\n` +
+              "Write and validate only artifactCandidatePath. Never write artifactFinalPath; Runtime promotes the validated candidate atomically."
+            : "";
           run = await deps.api.runtime.subagent.run({
             sessionKey: childKey,
             message:
               `[FlowOS Execution]\nexecutionId=${params.executionId}\nattemptId=${params.attemptId}\n` +
               "Only report structured progress with flowos_execution_stage. Do not complete or fail the Execution.\n\n" +
-              params.task,
+              params.task +
+              plannedOutputContract,
             deliver: false,
             lightContext: true,
             lane: `flowos-execution:${params.executionId}`,

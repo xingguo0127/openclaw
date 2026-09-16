@@ -14,7 +14,11 @@ import { getExecutionLocks } from "./src/locks.js";
 import { FlowosExecutionRuntime } from "./src/runtime.js";
 import { createSpaceMaterialTools } from "./src/space-materials.js";
 import { createFlowosExecutionTools } from "./src/tools.js";
-import { validateSpaceArtifact } from "./src/validation.js";
+import {
+  discardSpaceArtifactCandidate,
+  validateAndPromoteSpaceArtifact,
+  validateSpaceArtifact,
+} from "./src/validation.js";
 
 const pluginId = "flowos-execution-runtime";
 const bindingNamespace = "run-bindings";
@@ -151,12 +155,19 @@ export default definePluginEntry({
       api.logger,
       locks,
       (plan) =>
-        validateSpaceArtifact({
+        validateAndPromoteSpaceArtifact({
           runtime: api.runtime,
           workspaceDir: plan.workspaceDir,
           spaceId: plan.spaceId,
+          candidateFilePath: plan.artifactCandidateFilePath,
           filePath: plan.artifactFilePath,
           artifactType: plan.artifactType,
+        }),
+      (plan) =>
+        discardSpaceArtifactCandidate({
+          workspaceDir: plan.workspaceDir,
+          spaceId: plan.spaceId,
+          candidateFilePath: plan.artifactCandidateFilePath,
         }),
     );
 
