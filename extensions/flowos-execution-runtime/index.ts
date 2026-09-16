@@ -11,6 +11,7 @@ import {
 import { createImageGenerationTool, ImageGenerationRunStore } from "./src/image-generation.js";
 import { getExecutionLocks } from "./src/locks.js";
 import { FlowosExecutionRuntime } from "./src/runtime.js";
+import { createSpaceMaterialTools } from "./src/space-materials.js";
 import { createFlowosExecutionTools } from "./src/tools.js";
 import { validateSpaceArtifact } from "./src/validation.js";
 
@@ -122,6 +123,10 @@ export default definePluginEntry({
     const client = new FlowosExecutionClient(createAssistRequest(endpoint, token));
     const imageRequest = createAssistRequest(endpoint, imageToken, { timeoutMs: 180_000 });
     const imageRuns = new ImageGenerationRunStore();
+    const materialRequest = createAssistRequest(endpoint, token, {
+      timeoutMs: 60_000,
+      includeErrorDetails: true,
+    });
     const runtime = new FlowosExecutionRuntime(
       client,
       bindings,
@@ -142,6 +147,7 @@ export default definePluginEntry({
 
     api.registerTool(
       (context) => [
+        ...createSpaceMaterialTools(context, materialRequest),
         ...createFlowosExecutionTools({
           api,
           context,
@@ -177,6 +183,9 @@ export default definePluginEntry({
           "flowos_execution_complete",
           "flowos_execution_fail",
           "flowos_image_generate",
+          "space_read",
+          "space_material_ingest",
+          "space_artifact_publish",
         ],
       },
     );

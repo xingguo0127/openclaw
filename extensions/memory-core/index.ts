@@ -128,7 +128,7 @@ function createLazyMemorySearchTool(options: MemoryToolOptions): AnyAgentTool | 
     label: "Memory Search",
     name: "memory_search",
     description:
-      "Mandatory recall step: semantically search MEMORY.md + memory/*.md (and optional session transcripts) before answering questions about prior work, decisions, dates, people, preferences, or todos. Optional `corpus=wiki` or `corpus=all` also searches registered compiled-wiki supplements. `corpus=memory` restricts hits to indexed memory files (excludes session transcript chunks from ranking). `corpus=sessions` restricts hits to indexed session transcripts (same visibility rules as session history tools). If response has disabled=true, memory retrieval is unavailable and should be surfaced to the user.",
+      "Recall personal long-term facts from MEMORY.md + memory/*.md (and optional session transcripts). For project materials, purchases, component dimensions, inventory, or artifacts, first inspect the matching task space and its current sources/artifacts; memory_search is supplementary and is not required before reading project records. Optional `corpus=wiki` or `corpus=all` also searches registered compiled-wiki supplements. `corpus=memory` restricts hits to indexed memory files (excludes session transcript chunks from ranking). `corpus=sessions` restricts hits to indexed session transcripts (same visibility rules as session history tools). If response has disabled=true, memory retrieval is unavailable and should be surfaced to the user.",
     parameters: MemorySearchSchema,
     load: (module, loadOptions) => module.createMemorySearchTool(loadOptions),
   });
