@@ -33,13 +33,50 @@ export const ingestSchema = {
             type: "string",
           },
           text: {
-            description: "该图可见事实与识别文字；保留单位和不确定性，不补全不可读尺寸。",
+            description:
+              "已有识别结果时才提供。新图省略，由服务保存原图后一次识别文字和要点；不要先调用 image。",
             maxLength: 12000,
             minLength: 1,
             type: "string",
           },
+          facts: {
+            description:
+              "首次理解时一并给出用于详情和成果的结构化要点；仅无可靠要点时传空数组。省略表示尚未整理，将排队补齐。图片引用由服务生成。",
+            items: {
+              additionalProperties: false,
+              properties: {
+                group: {
+                  description: "资料中的对象或主题，不同规格分别分组。",
+                  maxLength: 100,
+                  minLength: 1,
+                  type: "string",
+                },
+                label: {
+                  maxLength: 40,
+                  minLength: 1,
+                  type: "string",
+                },
+                value: {
+                  description: "识别文字中的连续原文，保留单位、约等限定；不推算库存。",
+                  maxLength: 240,
+                  minLength: 1,
+                  type: "string",
+                },
+                quote: {
+                  description: "支持该值的连续识别原文。",
+                  maxLength: 1200,
+                  minLength: 1,
+                  type: "string",
+                },
+              },
+              required: ["group", "label", "value", "quote"],
+              type: "object",
+            },
+            maxItems: 24,
+            type: "array",
+          },
         },
-        required: ["url", "name", "text"],
+        required: ["url", "name"],
         type: "object",
       },
       maxItems: 3,
@@ -127,7 +164,23 @@ export const readSchema = {
   additionalProperties: false,
   properties: {
     spaceId: {
-      description: "省略则列出空间；提供则返回该空间资料、知识和成果。",
+      description: "省略列出空间；提供则只返回精简目录，不返回全库正文。",
+      maxLength: 200,
+      type: "string",
+    },
+    query: {
+      description: "空间内检索词，返回匹配资料及证据片段。",
+      maxLength: 200,
+      minLength: 1,
+      type: "string",
+    },
+    sourceId: {
+      description: "读取真实来源的要点、识别文字与图片引用，不使用 clipped 文件路径。",
+      maxLength: 200,
+      type: "string",
+    },
+    artifactId: {
+      description: "读取目录中真实成果的正文和版本。",
       maxLength: 200,
       type: "string",
     },
@@ -135,6 +188,24 @@ export const readSchema = {
       description: "读取某个成果完整正文时提供空间内真实文件路径。",
       maxLength: 512,
       type: "string",
+    },
+    offset: {
+      description: "列表或详情的下一页位置，使用返回的 nextOffset。",
+      minimum: 0,
+      type: "integer",
+    },
+    limit: {
+      description: "目录或检索结果页大小。",
+      maximum: 10,
+      minimum: 1,
+      type: "integer",
+    },
+    waitSeconds: {
+      description:
+        "仅 sourceId 可用。用户明确要求接着生成成果时，等待已在运行的识别最多30秒；不会启动任务。普通查询省略。",
+      maximum: 30,
+      minimum: 0,
+      type: "integer",
     },
   },
   type: "object",

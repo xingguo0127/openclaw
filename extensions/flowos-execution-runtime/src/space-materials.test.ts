@@ -63,9 +63,12 @@ it("does not call storage for an untrusted or background run", async () => {
   expect(request).not.toHaveBeenCalled();
 });
 
-it("keeps the observed missing-input fields in the generated tool contracts", () => {
+it("accepts saved images before recognition while requiring document content", () => {
   expect(ingestSchema.required).toContain("title");
-  expect(ingestSchema.properties.materials.items.required).toContain("text");
+  expect(ingestSchema.properties.materials.items.required).toEqual(
+    expect.arrayContaining(["url", "name"]),
+  );
+  expect(ingestSchema.properties.materials.items.required).not.toContain("text");
   expect(publishSchema.required).toContain("text");
   expect(publishSchema.properties).toHaveProperty("title");
 });

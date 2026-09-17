@@ -92,14 +92,14 @@ export function createSpaceMaterialTools(
       path: "read",
       parameters: readSchema,
       description:
-        "查询真实任务空间。省略 spaceId 列出空间；指定则读取有效 Source、Artifact、Knowledge。读取成果全文另传 filePath。legacyFiles 未登记，不能当作成果。",
+        "查询真实空间：省略 spaceId 列空间；指定则只返回分页目录；query 检索相关证据，sourceId 读取单份资料和图片引用，artifactId/filePath 读成果正文。按 nextOffset 续读，禁止猜路径或用 shell 扫描空间。已有 spaceId 可直接 query。waitSeconds 仅用于明确要求生成成果时等待既有识别，普通查询不等待。",
     },
     {
       name: "space_material_ingest",
       path: "ingest",
       parameters: ingestSchema,
       description:
-        "用户明确要求保存资料后，登记本会话图片到选定空间。一次完成原图、识别文字、来源登记、可选成果发布及自动来源关联。先逐图理解再调用。仅 registered/already_registered/completed 可确认相应步骤成功；source_registered_artifact_failed 表示仅资料保存成功。失败按错误修正重试，不可用 write/exec 绕过登记后报成功。工具不推卡、不修改 Wiki。",
+        "仅本轮用户明确要求保存/入库时使用；仅发送图片或描述图片不授权登记。用户要求入库时直接提交真实聊天图片 url/name，省略 text/facts，不先调用 image，不读取全库。服务立即保存原图并在后台一次识别。已有识别结果才提供 text/facts。普通入库省略 artifact，不额外生成文档。registered/already_registered 表示原图已保存，factsState.ready 才表示要点就绪；queued/running 时附 citationUrl 告知后台处理并结束本轮。明确要求成果时再等待 sourceId 就绪并发布。失败不准用 shell/write 绕过。",
     },
     {
       name: "space_artifact_publish",
@@ -156,7 +156,7 @@ export function createSpaceMaterialTools(
               : {}),
             recovery: authFailure
               ? "停止本轮空间操作，明确说明连接或权限异常、尚未完成。读取失败不表示空间不存在；不能改搜记忆后猜空间ID、建议重建空间、重复索要业务确认或改用文件工具。连接修复后再重试。"
-              : "未确认操作完成。先依据错误检查真实空间ID或调用参数；空间名称不能代替ID。不要直接写空间文件、推成功卡或宣称已登记。",
+              : "未确认操作完成。先依据错误检查真实空间ID或调用参数；空间名称不能代替ID。资料使用 sourceId，成果使用目录中的 artifactId/filePath；禁止用 exec/read 扫描空间文件代替工具，失败不得宣称完成。",
           }),
           isError: true,
         };
