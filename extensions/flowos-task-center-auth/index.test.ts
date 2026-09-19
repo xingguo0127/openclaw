@@ -475,6 +475,34 @@ describe("flowos task-center auth", () => {
     expect(pairingMocks.approve).not.toHaveBeenCalled();
   });
 
+  it("provisions AgentTerminal without changing the FlowGo profile", async () => {
+    const bytes = Buffer.alloc(32, 11);
+    const publicKey = bytes.toString("base64url");
+    const deviceId = createHash("sha256").update(bytes).digest("hex");
+    pairingMocks.get.mockResolvedValue(null);
+    pairingMocks.request.mockResolvedValue({ request: { requestId: "terminal-1" } });
+    pairingMocks.approve.mockResolvedValue({ status: "approved", device: { deviceId } });
+    pairingMocks.ensure.mockResolvedValue({ token: "terminal-device-token" });
+    const { calls } = setup();
+    const [, handler] = method(calls, "flowos.deviceOnboardingProvision");
+    const respond = vi.fn();
+    await invoke(handler, {
+      params: { deviceId, devicePublicKey: publicKey, deviceType: "AgentTerminal" },
+      client: pairedOperator(),
+      respond,
+    });
+    expect(respond.mock.calls[0][0]).toBe(true);
+    expect(pairingMocks.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "gateway-client",
+        platform: "esp32",
+        deviceFamily: "ESP32",
+        modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
+        scopes: ["operator.read", "operator.write"],
+      }),
+    );
+  });
+
   it("repairs the legacy FlowGo identity to the current client contract", async () => {
     const publicKeyBytes = Buffer.alloc(32, 9);
     const publicKey = publicKeyBytes.toString("base64url");
