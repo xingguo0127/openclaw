@@ -109,15 +109,28 @@ export function createImageGenerationTool(params: {
     name: "flowos_image_generate",
     label: "FlowOS Image Generate",
     description:
-      "Primary image-generation tool for explicit FlowOS user chat requests. Use this instead of image_generate; it generates one image through FlowOS and delivers a durable media card.",
+      "Create or edit one image for an explicit FlowOS user request and deliver a durable media card. For editing, pass referenceImages copied from the user photo URLs or previous media://generated/ result. Never omit the reference and recreate from text.",
     executionMode: "sequential",
     parameters: Type.Object(
-      { prompt: Type.String({ minLength: 1, maxLength: 4000 }) },
+      { prompt: Type.String({ minLength: 1, maxLength: 4000 }),
+        referenceImages: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2048 }), { minItems: 1, maxItems: 4 })) },
       { additionalProperties: false },
     ),
     async execute(_toolCallId, args) {
       const active = params.runs.require(params.context, params.ownerAgentId);
       const prompt = (args as { prompt: string }).prompt.trim();
+      const inputs = (args as { referenceImages?: string[] }).referenceImages;
+      let referenceAssetRefs: string[] = [];
+      if (inputs !== undefined) {
+        if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > 4 || inputs.some((v) => typeof v !== "string" || v.length > 2048)) {
+          throw new Error("Invalid referenceImages");
+        }
+        const resolved = await params.request("POST", "/api/platform/capabilities/image.generate.v1/references", { referenceImages: inputs });
+        if (!Array.isArray(resolved.referenceAssetRefs) || resolved.referenceAssetRefs.length !== inputs.length || resolved.referenceAssetRefs.some((v) => typeof v !== "string" || !v.startsWith("media://"))) {
+          throw new Error("Invalid image reference response");
+        }
+        referenceAssetRefs = resolved.referenceAssetRefs as string[];
+      }
       const idempotencyKey = operationKey(active);
       const response = await params.request(
         "POST",
@@ -125,6 +138,7 @@ export function createImageGenerationTool(params: {
         {
           purpose: "conversation.image.generate",
           prompt,
+          ...(referenceAssetRefs.length ? { referenceAssetRefs } : {}),
           aspectRatio: "1:1",
           sizeClass: "small",
           qualityClass: "balanced",
@@ -138,8 +152,8 @@ export function createImageGenerationTool(params: {
           type: "media_card",
           sourcePackage: "com.flowos.platform",
           sourceLabel: "FlowOS AIGC",
-          summaryText: "已生成 1 张图片",
-          caption: "图片生成好了",
+          summaryText: referenceAssetRefs.length ? "已修改 1 张图片" : "已生成 1 张图片",
+          caption: referenceAssetRefs.length ? "图片修改好了，原图已保留" : "图片生成好了",
           items: [{ assetRef: assets[0].assetRef, displayName: "AI 生成图片 1" }],
         });
         const delivered = await (params.inject ?? injectMessageBySessionKey)(
