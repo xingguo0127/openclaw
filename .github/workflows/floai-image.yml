@@ -60,7 +60,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: false
           build-args: |
-            OPENCLAW_EXTENSIONS=qwen,perplexity
+            OPENCLAW_EXTENSIONS=qwen,perplexity,flowos-capabilities
             OPENCLAW_IMAGE_NPM_PACKAGES=@fly-ai/flyai-cli@1.0.16
             OPENCLAW_INSTALL_BROWSER=1
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
@@ -71,6 +71,12 @@ jobs:
           docker pull "$IMAGE_REF"
           docker run --rm --entrypoint node "$IMAGE_REF" -e \
             "import('/app/dist/extensions/perplexity/index.js').then((plugin) => { if (!plugin.default) throw new Error('perplexity plugin has no default export') })"
+
+      - name: Verify shared capability discovery is in the image
+        run: |
+          IMAGE_REF="${IMAGE}@${{ steps.build.outputs.digest }}"
+          docker run --rm --entrypoint node "$IMAGE_REF" -e \
+            "import('/app/dist/extensions/flowos-capabilities/index.js').then(m => { if (!m.default) throw new Error('missing shared capability plugin') })"
 
       - name: 校验 FlowOS QA Chromium（${{ matrix.arch }}）
         run: |
