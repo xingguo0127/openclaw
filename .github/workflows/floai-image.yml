@@ -43,7 +43,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT || github.token }}
+          password: ${{ github.token }}
 
       # default variant build；OPENCLAW_EXTENSIONS 保留 floai 自建能力依赖的插件。
       # ★ qwen 必须显式保留:根 package.json 的 files 里有 `!dist/extensions/qwen/**`
@@ -180,7 +180,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT || github.token }}
+          password: ${{ github.token }}
 
       - name: 合并成多架构 manifest
         working-directory: /tmp/digests
