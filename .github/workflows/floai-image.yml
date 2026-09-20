@@ -32,7 +32,7 @@ jobs:
       - name: 生成小写 GHCR 镜像名
         run: |
           IMAGE_OWNER="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          echo "IMAGE=ghcr.io/${IMAGE_OWNER}/openclaw" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${IMAGE_OWNER}/openclaw-demo-weekly" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
 
@@ -165,7 +165,7 @@ jobs:
       - name: 生成小写 GHCR 镜像名
         run: |
           IMAGE_OWNER="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          echo "IMAGE=ghcr.io/${IMAGE_OWNER}/openclaw" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${IMAGE_OWNER}/openclaw-demo-weekly" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v4
         with:
