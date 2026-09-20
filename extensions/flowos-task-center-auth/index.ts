@@ -591,6 +591,22 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
       const input = params ?? {};
       const deviceId = normalizedString(input.deviceId);
       const publicKey = normalizedString(input.devicePublicKey);
+      const terminal = input.deviceType === "AgentTerminal";
+      const profile = terminal
+        ? {
+            displayName: "FlowOS Agent Terminal",
+            platform: "esp32",
+            deviceFamily: "ESP32",
+            clientId: "gateway-client",
+            modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
+          }
+        : {
+            displayName: "FlowGo",
+            platform: "linux",
+            deviceFamily: "RaspberryPi",
+            clientId: "openclaw-pet",
+            modelIdentifier: "FlowGo",
+          };
       let publicKeyBytes: Buffer;
       try {
         publicKeyBytes = Buffer.from(publicKey, "base64url");
@@ -606,7 +622,12 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
         return;
       }
       if (
-        !hasExactKeys(input, ["deviceId", "devicePublicKey"]) ||
+        !hasExactKeys(
+          input,
+          terminal
+            ? ["deviceId", "devicePublicKey", "deviceType"]
+            : ["deviceId", "devicePublicKey"],
+        ) ||
         !validIdentifier(deviceId) ||
         publicKeyBytes.length !== 32 ||
         publicKeyBytes.toString("base64url") !== publicKey ||
@@ -620,12 +641,13 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
         if (existing) {
           const samePublicKey = existing.publicKey === publicKey;
           const isCurrentFlowGoIdentity =
-            existing.clientId === "openclaw-pet" &&
+            existing.clientId === profile.clientId &&
             existing.clientMode === "ui" &&
-            existing.platform === "linux" &&
-            existing.deviceFamily === "RaspberryPi" &&
-            existing.modelIdentifier === "FlowGo";
+            existing.platform === profile.platform &&
+            existing.deviceFamily === profile.deviceFamily &&
+            existing.modelIdentifier === profile.modelIdentifier;
           const isLegacyFlowGoIdentity =
+            !terminal &&
             existing.clientId === "gateway-client" &&
             existing.clientMode === "ui" &&
             existing.platform === "linux" &&
@@ -652,12 +674,8 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
         const requested = await requestDevicePairing({
           deviceId,
           publicKey,
-          displayName: "FlowGo",
-          platform: "linux",
-          deviceFamily: "RaspberryPi",
-          clientId: "openclaw-pet",
+          ...profile,
           clientMode: "ui",
-          modelIdentifier: "FlowGo",
           role: "operator",
           scopes: ["operator.read", "operator.write"],
           silent: false,
