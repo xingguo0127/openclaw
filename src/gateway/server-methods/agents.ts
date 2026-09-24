@@ -47,6 +47,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { root, FsSafeError, type ReadResult } from "../../infra/fs-safe.js";
 import { movePathToTrash } from "../../plugin-sdk/browser-maintenance.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../routing/session-key.js";
+import { isAvatarImageDataUrl, isWorkspaceRelativeAvatarPath } from "../../shared/avatar-policy.js";
 import { resolveUserPath } from "../../utils.js";
 import { listAgentsForGateway } from "../session-utils.js";
 import {
@@ -633,6 +634,16 @@ export const agentsHandlers: GatewayRequestHandlers = {
       avatar: params.avatar,
     });
     const hasIdentityFields = Boolean(identity);
+    const previousAvatar = resolveAgentIdentity(cfg, agentId)?.avatar?.trim();
+    const nextAvatar = identity?.avatar;
+    // Replacing a legacy inline image with a workspace file intentionally shrinks
+    // config size; keep every other destructive-write guard active.
+    const allowAvatarSizeDrop = Boolean(
+      previousAvatar &&
+      isAvatarImageDataUrl(previousAvatar) &&
+      nextAvatar &&
+      isWorkspaceRelativeAvatarPath(nextAvatar),
+    );
 
     const agentConfigUpdate = buildAgentConfigUpdate({
       agentId,
@@ -685,7 +696,10 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     try {
-      await updateAgentConfigEntry(agentConfigUpdate);
+      await updateAgentConfigEntry({
+        ...agentConfigUpdate,
+        allowConfigSizeDrop: allowAvatarSizeDrop,
+      });
     } catch (error) {
       if (error instanceof AgentConfigPreconditionError) {
         respondAgentConfigPreconditionError(respond, error);

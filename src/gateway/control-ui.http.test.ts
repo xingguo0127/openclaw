@@ -1080,6 +1080,38 @@ describe("handleControlUiHttpRequest", () => {
     }
   });
 
+  it("serves authenticated inline avatar bytes without exposing the data URL", async () => {
+    const body = Buffer.from("avatar-bytes\n");
+    const dataUrl = `data:image/jpeg;base64,${body.toString("base64")}`;
+    const { res, end, handled } = await runAvatarRequest({
+      url: "/avatar/main",
+      method: "GET",
+      auth: { mode: "token", token: "test-token", allowTailscale: false },
+      headers: { authorization: "Bearer test-token" },
+      resolveAvatar: () => ({ kind: "data", url: dataUrl, source: dataUrl }),
+    });
+
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Type", "image/jpeg");
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Length", String(body.length));
+    expect(responseBody(end)).toBe("avatar-bytes\n");
+  });
+
+  it("rejects malformed inline avatar data", async () => {
+    const { res, end, handled } = await runAvatarRequest({
+      url: "/avatar/main",
+      method: "GET",
+      resolveAvatar: () => ({
+        kind: "data",
+        url: "data:image/jpeg;base64,not-valid!",
+        source: "data:image/jpeg;base64,not-valid!",
+      }),
+    });
+
+    expectNotFoundResponse({ handled, res, end });
+  });
+
   it("rejects avatar symlink paths from resolver", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-avatar-http-link-"));
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-avatar-http-outside-"));

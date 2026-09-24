@@ -9,7 +9,11 @@ import {
   FlowosExecutionClient,
   resolveTrustedAssistEndpoint,
 } from "./src/client.js";
-import { createImageGenerationTool, ImageGenerationRunStore } from "./src/image-generation.js";
+import {
+  createAgentAvatarApplyTool,
+  createImageGenerationTool,
+  ImageGenerationRunStore,
+} from "./src/image-generation.js";
 import { getExecutionLocks } from "./src/locks.js";
 import { FlowosExecutionRuntime } from "./src/runtime.js";
 import { createSpaceMaterialTools } from "./src/space-materials.js";
@@ -200,6 +204,12 @@ export default definePluginEntry({
           runs: imageRuns,
           ownerAgentId,
         }),
+        createAgentAvatarApplyTool({
+          context,
+          request: imageRequest,
+          runs: imageRuns,
+          ownerAgentId,
+        }),
       ],
       {
         names: [
@@ -209,6 +219,7 @@ export default definePluginEntry({
           "flowos_execution_complete",
           "flowos_execution_fail",
           "flowos_image_generate",
+          "flowos_agent_avatar_apply",
           "space_read",
           "space_material_ingest",
           "space_artifact_publish",
