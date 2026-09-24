@@ -66,15 +66,15 @@ const readTool = {
   parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
 };
 
-function deepSeekV4Model(id: "deepseek-v4-flash" | "deepseek-v4-pro"): OpenAICompletionsModel {
+function deepSeekV4Model(id: "deepseek-flash" | "deepseek-v4-pro"): OpenAICompletionsModel {
   return {
     provider: "deepseek",
     id,
-    name: id === "deepseek-v4-flash" ? "DeepSeek V4 Flash" : "DeepSeek V4 Pro",
+    name: id === "deepseek-flash" ? "DeepSeek-V4.1-Flash" : "DeepSeek V4 Pro",
     api: "openai-completions",
     baseUrl: "https://api.deepseek.com",
     reasoning: true,
-    input: ["text"],
+    input: id === "deepseek-flash" ? ["text", "image"] : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 1_000_000,
     maxTokens: 384_000,
@@ -115,7 +115,7 @@ function deepSeekReasoningToolReplayContext() {
   return readToolReplayContext(
     replayAssistantMessage({
       provider: "deepseek",
-      model: "deepseek-v4-flash",
+      model: "deepseek-flash",
       content: [
         {
           type: "thinking",
@@ -198,15 +198,22 @@ describe("deepseek provider plugin", () => {
     expect(catalogProvider.api).toBe("openai-completions");
     expect(catalogProvider.baseUrl).toBe("https://api.deepseek.com");
     expect(catalogProvider.models?.map((model) => model.id)).toEqual([
-      "deepseek-v4-flash",
+      "deepseek-flash",
       "deepseek-v4-pro",
       "deepseek-chat",
       "deepseek-reasoner",
     ]);
-    const flashModel = catalogProvider.models?.find((model) => model.id === "deepseek-v4-flash");
+    const flashModel = catalogProvider.models?.find((model) => model.id === "deepseek-flash");
     expect(flashModel?.reasoning).toBe(true);
+    expect(flashModel?.input).toEqual(["text", "image"]);
     expect(flashModel?.contextWindow).toBe(1_000_000);
     expect(flashModel?.maxTokens).toBe(384_000);
+    expect(flashModel?.cost).toEqual({
+      input: 0.3,
+      output: 1.2,
+      cacheRead: 0.006,
+      cacheWrite: 0,
+    });
     expect(flashModel?.compat?.supportsReasoningEffort).toBe(true);
     expect(flashModel?.compat?.maxTokensField).toBe("max_tokens");
     expect(
@@ -320,13 +327,13 @@ describe("deepseek provider plugin", () => {
     expect(
       resolveThinkingProfile({
         provider: "deepseek",
-        modelId: "deepseek-v4-flash",
+        modelId: "deepseek-flash",
       } as never)?.defaultLevel,
     ).toBe("high");
     expect(
       resolveThinkingProfile({
         provider: "deepseek",
-        modelId: "deepseek-v4-flash",
+        modelId: "deepseek-flash",
       } as never)?.levels.map((level) => level.id),
     ).toEqual(expectedV4Levels);
     expect(
@@ -391,7 +398,7 @@ describe("deepseek provider plugin", () => {
 
   it("preserves replayed reasoning_content when DeepSeek V4 thinking is enabled", async () => {
     const capture: PayloadCapture = {};
-    const model = deepSeekV4Model("deepseek-v4-flash");
+    const model = deepSeekV4Model("deepseek-flash");
     const context = deepSeekReasoningToolReplayContext();
     const baseStreamFn = createPayloadCapturingStream(capture);
 
@@ -473,7 +480,7 @@ describe("deepseek provider plugin", () => {
 
   it("strips replayed reasoning_content when DeepSeek V4 thinking is disabled", async () => {
     const capture: PayloadCapture = {};
-    const model = deepSeekV4Model("deepseek-v4-flash");
+    const model = deepSeekV4Model("deepseek-flash");
     const context = deepSeekReasoningToolReplayContext();
     const baseStreamFn = createPayloadCapturingStream(capture);
 

@@ -4012,6 +4012,7 @@ function sanitizeReasoningContentReplayFields(record: Record<string, unknown>): 
 }
 
 const REASONING_CONTENT_REPLAY_MODEL_IDS = new Set([
+  "deepseek-flash",
   "deepseek-v4-flash",
   "deepseek-v4-pro",
   "kimi-for-coding",

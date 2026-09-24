@@ -17,7 +17,7 @@ import { buildDeepSeekProvider } from "./provider-catalog.js";
 import { createDeepSeekV4ThinkingWrapper } from "./stream.js";
 
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY ?? "";
-const DEEPSEEK_LIVE_MODEL = process.env.OPENCLAW_LIVE_DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash";
+const DEEPSEEK_LIVE_MODEL = process.env.OPENCLAW_LIVE_DEEPSEEK_MODEL?.trim() || "deepseek-flash";
 const LIVE = isLiveTestEnabled(["DEEPSEEK_LIVE_TEST"]);
 
 const describeLive = LIVE && DEEPSEEK_KEY ? describe : describe.skip;
@@ -63,9 +63,9 @@ function resolveDeepSeekLiveModel(): Model<"openai-completions"> {
 function resolveDeepSeekV4LiveModel(): Model<"openai-completions"> {
   const provider = buildDeepSeekProvider();
   const requestedModel =
-    DEEPSEEK_LIVE_MODEL === "deepseek-v4-flash" || DEEPSEEK_LIVE_MODEL === "deepseek-v4-pro"
+    DEEPSEEK_LIVE_MODEL === "deepseek-flash" || DEEPSEEK_LIVE_MODEL === "deepseek-v4-pro"
       ? DEEPSEEK_LIVE_MODEL
-      : "deepseek-v4-flash";
+      : "deepseek-flash";
   const model = provider.models?.find((entry) => entry.id === requestedModel);
   if (!model) {
     throw new Error(`DeepSeek bundled catalog does not include ${requestedModel}`);

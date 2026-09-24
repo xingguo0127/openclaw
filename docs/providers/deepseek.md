@@ -35,7 +35,7 @@ openclaw gateway restart
     openclaw onboard --auth-choice deepseek-api-key
     ```
 
-    This will prompt for your API key and set `deepseek/deepseek-v4-flash` as the default model.
+    This will prompt for your API key and set `deepseek/deepseek-flash` as the default model.
 
   </Step>
   <Step title="Verify models are available">
@@ -77,12 +77,17 @@ is available to that process (for example, in `~/.openclaw/.env` or via
 
 ## Built-in catalog
 
-| Model ref                    | Name              | Input | Context   | Max output | Notes                                      |
-| ---------------------------- | ----------------- | ----- | --------- | ---------- | ------------------------------------------ |
-| `deepseek/deepseek-v4-flash` | DeepSeek V4 Flash | text  | 1,000,000 | 384,000    | Default model; V4 thinking-capable surface |
-| `deepseek/deepseek-v4-pro`   | DeepSeek V4 Pro   | text  | 1,000,000 | 384,000    | V4 thinking-capable surface                |
-| `deepseek/deepseek-chat`     | DeepSeek Chat     | text  | 131,072   | 8,192      | DeepSeek V3.2 non-thinking surface         |
-| `deepseek/deepseek-reasoner` | DeepSeek Reasoner | text  | 131,072   | 65,536     | Reasoning-enabled V3.2 surface             |
+| Model ref                    | Name                | Input       | Context   | Max output | Notes                                          |
+| ---------------------------- | ------------------- | ----------- | --------- | ---------- | ---------------------------------------------- |
+| `deepseek/deepseek-flash`    | DeepSeek-V4.1-Flash | text, image | 1,000,000 | 384,000    | Default model; multimodal and thinking-capable |
+| `deepseek/deepseek-v4-pro`   | DeepSeek V4 Pro     | text        | 1,000,000 | 384,000    | Legacy V4 Pro route                            |
+| `deepseek/deepseek-chat`     | DeepSeek Chat       | text        | 131,072   | 8,192      | Legacy non-thinking compatibility surface      |
+| `deepseek/deepseek-reasoner` | DeepSeek Reasoner   | text        | 131,072   | 65,536     | Legacy reasoning-enabled compatibility surface |
+
+DeepSeek uses peak/off-peak pricing. OpenClaw's static cost estimate uses the
+peak USD rates (`$0.30` uncached input, `$0.006` cached input, and `$1.20`
+output per million tokens) so estimates do not understate the maximum charge.
+DeepSeek currently bills half those rates during off-peak hours.
 
 <Tip>
 V4 models support DeepSeek's `thinking` control. OpenClaw also replays
@@ -99,7 +104,7 @@ OpenAI-compatible providers: after a thinking-enabled turn uses tools, DeepSeek
 expects replayed assistant messages from that turn to include
 `reasoning_content` on follow-up requests. OpenClaw handles this inside the
 DeepSeek plugin, so normal multi-turn tool use works with
-`deepseek/deepseek-v4-flash` and `deepseek/deepseek-v4-pro`.
+`deepseek/deepseek-flash` and `deepseek/deepseek-v4-pro`.
 
 If you switch an existing session from another OpenAI-compatible provider to a
 DeepSeek V4 model, older assistant tool-call turns may not have native
@@ -112,9 +117,10 @@ OpenClaw sends DeepSeek `thinking: { type: "disabled" }` and strips replayed
 `reasoning_content` from the outgoing history. This keeps disabled-thinking
 sessions on the non-thinking DeepSeek path.
 
-Use `deepseek/deepseek-v4-flash` for the default fast path. Use
-`deepseek/deepseek-v4-pro` when you want the stronger V4 model and can accept
-higher cost or latency.
+Use `deepseek/deepseek-flash` for the current default path. The older
+`deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` ids are provider-side
+compatibility aliases for V4.1 Flash; new configuration should use
+`deepseek-flash` directly.
 
 ## Live testing
 
@@ -123,7 +129,7 @@ run only the DeepSeek V4 direct-model checks:
 
 ```bash
 OPENCLAW_LIVE_PROVIDERS=deepseek \
-OPENCLAW_LIVE_MODELS="deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro" \
+OPENCLAW_LIVE_MODELS="deepseek/deepseek-flash,deepseek/deepseek-v4-pro" \
 pnpm test:live src/agents/models.profiles.live.test.ts
 ```
 
@@ -137,7 +143,7 @@ follow-up turns preserve the replay payload DeepSeek requires.
   env: { DEEPSEEK_API_KEY: "sk-..." },
   agents: {
     defaults: {
-      model: { primary: "deepseek/deepseek-v4-flash" },
+      model: { primary: "deepseek/deepseek-flash" },
     },
   },
 }

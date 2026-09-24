@@ -622,12 +622,15 @@ describe("isHighSignalLiveModelRef", () => {
     expect(isHighSignalLiveModelRef({ provider: "xai", id: "grok-4-1-fast" })).toBe(false);
   });
 
-  it("keeps DeepSeek V4 models in the default live matrix when the provider marks them modern", () => {
+  it("keeps current DeepSeek models in the default live matrix when the provider marks them modern", () => {
     providerRuntimeMocks.resolveProviderModernModelRef.mockImplementation(({ provider, context }) =>
-      provider === "deepseek" && context.modelId.startsWith("deepseek-v4") ? true : undefined,
+      provider === "deepseek" &&
+      (context.modelId === "deepseek-flash" || context.modelId.startsWith("deepseek-v4"))
+        ? true
+        : undefined,
     );
 
-    expect(isHighSignalLiveModelRef({ provider: "deepseek", id: "deepseek-v4-flash" })).toBe(true);
+    expect(isHighSignalLiveModelRef({ provider: "deepseek", id: "deepseek-flash" })).toBe(true);
     expect(isHighSignalLiveModelRef({ provider: "deepseek", id: "deepseek-v4-pro" })).toBe(true);
     expect(isHighSignalLiveModelRef({ provider: "deepseek", id: "deepseek-chat" })).toBe(false);
   });
@@ -659,7 +662,7 @@ describe("isPrioritizedHighSignalLiveModelRef", () => {
       { provider: "google", id: "gemini-3-flash-preview" },
       { provider: "moonshot", id: "kimi-k2.7-code" },
       { provider: "anthropic", id: "claude-opus-4-6" },
-      { provider: "deepseek", id: "deepseek-v4-flash" },
+      { provider: "deepseek", id: "deepseek-flash" },
       { provider: "deepseek", id: "deepseek-v4-pro" },
       { provider: "minimax", id: "minimax-m3" },
       { provider: "openai", id: "gpt-5.5" },
@@ -710,7 +713,7 @@ describe("selectHighSignalLiveItems", () => {
       { provider: "anthropic", id: "claude-opus-4-6" },
       { provider: "google", id: "gemini-3.1-pro-preview" },
       { provider: "google", id: "gemini-3-flash-preview" },
-      { provider: "deepseek", id: "deepseek-v4-flash" },
+      { provider: "deepseek", id: "deepseek-flash" },
       { provider: "openai", id: "gpt-5.5" },
       { provider: "opencode", id: "big-pickle" },
     ];
@@ -730,10 +733,10 @@ describe("selectHighSignalLiveItems", () => {
     ]);
   });
 
-  it("prioritizes DeepSeek V4 before later fallback providers", () => {
+  it("prioritizes current DeepSeek models before later fallback providers", () => {
     const items = [
       { provider: "openai", id: "gpt-5.5" },
-      { provider: "deepseek", id: "deepseek-v4-flash" },
+      { provider: "deepseek", id: "deepseek-flash" },
       { provider: "deepseek", id: "deepseek-v4-pro" },
       { provider: "minimax", id: "minimax-m3" },
     ];
@@ -746,7 +749,7 @@ describe("selectHighSignalLiveItems", () => {
         (item) => item.provider,
       ),
     ).toEqual([
-      { provider: "deepseek", id: "deepseek-v4-flash" },
+      { provider: "deepseek", id: "deepseek-flash" },
       { provider: "deepseek", id: "deepseek-v4-pro" },
       { provider: "minimax", id: "minimax-m3" },
     ]);
