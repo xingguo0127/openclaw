@@ -1,7 +1,11 @@
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AssistRequest } from "./client.js";
-import { createImageGenerationTool, ImageGenerationRunStore } from "./image-generation.js";
+import {
+  createAgentAvatarApplyTool,
+  createImageGenerationTool,
+  ImageGenerationRunStore,
+} from "./image-generation.js";
 
 const context: OpenClawPluginToolContext = {
   agentId: "main",
@@ -96,6 +100,35 @@ describe("FlowOS image generation private tool", () => {
     expect(keys[0]).not.toBe(keys[1]);
   });
 
+  it("normalizes chat image references before requesting image editing", async () => {
+    const calls: Array<{ path: string; payload?: Record<string, unknown> }> = [];
+    const request: AssistRequest = async (_method, path, payload) => {
+      calls.push({ path, payload });
+      if (path.endsWith("/references")) {
+        return { referenceAssetRefs: ["media://chat/photo.png"] };
+      }
+      return succeeded();
+    };
+    const tool = createImageGenerationTool({
+      context,
+      request,
+      runs: new ImageGenerationRunStore(),
+      ownerAgentId: "agent:main",
+      inject: vi.fn(async () => ({ ok: true as const })),
+    });
+
+    await tool.execute("edit-call", {
+      prompt: "改成水彩头像",
+      referenceImages: ["http://127.0.0.1:18790/api/media/chat/photo.png"],
+    });
+
+    expect(calls.map((call) => call.path)).toEqual([
+      "/api/platform/capabilities/image.generate.v1/references",
+      "/api/platform/capabilities/image.generate.v1/generate",
+    ]);
+    expect(calls[1]?.payload?.referenceAssetRefs).toEqual(["media://chat/photo.png"]);
+  });
+
   it("preserves delivery deduplication across attempts in the same outer run", async () => {
     const request: AssistRequest = async () => succeeded();
     const inject = vi.fn(async () => ({ ok: true as const }));
@@ -170,4 +203,39 @@ describe("FlowOS image generation private tool", () => {
       expect(request).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("FlowOS Agent avatar apply private tool", () => {
+  it("applies a generated OSS asset to the trusted current Agent", async () => {
+    const request = vi.fn<AssistRequest>(async () => ({ ok: true, agentId: "main" }));
+    const tool = createAgentAvatarApplyTool({
+      context: { ...context, runId: "apply-run" },
+      request,
+      runs: new ImageGenerationRunStore(),
+      ownerAgentId: "agent:main",
+    });
+
+    await tool.execute("apply-call", { assetRef: "media://generated/media-avatar-1" });
+
+    expect(request).toHaveBeenCalledWith(
+      "POST",
+      "/api/platform/capabilities/image.generate.v1/apply-agent-avatar",
+      { agentId: "main", assetRef: "media://generated/media-avatar-1" },
+    );
+  });
+
+  it("rejects background avatar changes before requesting Assist", async () => {
+    const request = vi.fn<AssistRequest>();
+    const tool = createAgentAvatarApplyTool({
+      context: { ...context, trigger: "heartbeat" },
+      request,
+      runs: new ImageGenerationRunStore(),
+      ownerAgentId: "agent:main",
+    });
+
+    await expect(
+      tool.execute("apply-call", { assetRef: "media://generated/media-avatar-1" }),
+    ).rejects.toThrow("trusted owner session");
+    expect(request).not.toHaveBeenCalled();
+  });
 });

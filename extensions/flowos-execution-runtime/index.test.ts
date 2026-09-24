@@ -191,6 +191,8 @@ function fakeClient(options?: {
       };
     } else if (path.endsWith("/fail")) {
       item = { ...item, status: "FAILED", version: item.version + 1, stageKey: "failed" };
+    } else if (path.endsWith("/cancel")) {
+      item = { ...item, status: "CANCELLED", version: item.version + 1, stageKey: "cancelled" };
     }
     await options?.afterRequest?.(method, path, payload);
     return item;
@@ -283,7 +285,7 @@ function tools(params?: {
       (plan) =>
         validateArtifact({
           spaceId: plan.spaceId,
-          filePath: plan.artifactFilePath,
+          filePath: plan.artifactCandidateFilePath,
           artifactType: plan.artifactType,
         }),
     );
@@ -365,7 +367,16 @@ const routebookResultPlan = {
   cardCaption: "路书做好啦，点开看看～",
 };
 
-async function spawnRoutebook(owner: ReturnType<typeof tools>, resultPlan = routebookResultPlan) {
+async function spawnRoutebook(
+  owner: ReturnType<typeof tools>,
+  resultPlan: {
+    spaceId: string;
+    artifactTitle: string;
+    artifactFilePath: string;
+    artifactType: "html" | "markdown";
+    cardCaption: string;
+  } = routebookResultPlan,
+) {
   await owner.byName.get("flowos_execution_spawn")?.execute("spawn", {
     executionId: "execution-1",
     attemptId: "attempt-1",
@@ -534,6 +545,7 @@ describe("FlowOS Execution plugin boundaries", () => {
           system: fakeSystem(),
         },
         registerTool: vi.fn(),
+        registerGatewayMethod: vi.fn(),
         on: vi.fn(),
         logger: { warn: vi.fn(), info: vi.fn() },
       } as never),
@@ -544,6 +556,7 @@ describe("FlowOS Execution plugin boundaries", () => {
     process.env.FLOWOS_TASK_CENTER_JWT_SECRET = "m".repeat(64);
     process.env.ASSIST_API_BASE = "http://assist:18790";
     const registerTool = vi.fn();
+    const registerGatewayMethod = vi.fn();
     const on = vi.fn();
     plugin.register({
       runtime: {
@@ -552,6 +565,7 @@ describe("FlowOS Execution plugin boundaries", () => {
         system: fakeSystem(),
       },
       registerTool,
+      registerGatewayMethod,
       on,
       logger: { warn: vi.fn(), info: vi.fn() },
     } as never);
@@ -562,6 +576,7 @@ describe("FlowOS Execution plugin boundaries", () => {
       workspaceDir: "/tmp/workspace",
     });
     expect(registered).toHaveLength(6);
+    expect(registerGatewayMethod.mock.calls[0]?.[0]).toBe("flowos.execution.cancel");
     expect(on.mock.calls.map((call) => call[0])).toEqual(["subagent_ended", "gateway_start"]);
   });
 
@@ -582,6 +597,9 @@ describe("FlowOS Execution plugin boundaries", () => {
       expect(schema).not.toContain("userId");
       expect(schema).not.toContain("tenantId");
     }
+    expect(JSON.stringify(byName.get("flowos_execution_stage")?.parameters)).not.toContain(
+      "expectedVersion",
+    );
   });
 
   it("start derives owner and requester then replays without cross-session adoption", async () => {
@@ -684,15 +702,25 @@ describe("FlowOS Execution plugin boundaries", () => {
     });
     await child.byName.get("flowos_execution_stage")?.execute("stage", {
       executionId: "execution-1",
-      expectedVersion: 1,
       stageKey: "generating",
       stageLabel: "正在生成",
     });
     expect(assist.getItem()).toMatchObject({ status: "RUNNING", version: 2 });
+    await child.byName.get("flowos_execution_stage")?.execute("stage-2", {
+      executionId: "execution-1",
+      stageKey: "validating",
+      stageLabel: "正在校验",
+    });
+    expect(assist.getItem()).toMatchObject({ status: "RUNNING", version: 3 });
+    expect(
+      assist.calls.filter((call) => call.path.endsWith("/stage")).map((call) => call.payload),
+    ).toEqual([
+      expect.objectContaining({ expectedVersion: 1, stageKey: "generating" }),
+      expect.objectContaining({ expectedVersion: 2, stageKey: "validating" }),
+    ]);
     await expect(
       child.byName.get("flowos_execution_stage")?.execute("cross", {
         executionId: "execution-other",
-        expectedVersion: 2,
         stageKey: "bad",
         stageLabel: "bad",
       }),
@@ -732,7 +760,7 @@ describe("FlowOS Execution plugin boundaries", () => {
     expect(subagent.run).toHaveBeenCalledWith(
       expect.objectContaining({
         deliver: false,
-        message: expect.stringContaining("expectedVersion=1"),
+        message: expect.not.stringContaining("expectedVersion"),
       }),
     );
     await owner.byName.get("flowos_execution_spawn")?.execute("spawn-replay", {
@@ -771,7 +799,6 @@ describe("FlowOS Execution plugin boundaries", () => {
     await child.byName.get("flowos_execution_stage")?.execute("child-stage", {
       executionId: "execution-1",
       attemptId: "attempt-1",
-      expectedVersion: 1,
       stageKey: "collecting",
       stageLabel: "正在收集素材",
     });
@@ -792,9 +819,18 @@ describe("FlowOS Execution plugin boundaries", () => {
       status: "RUNNING",
       finalizationPlan: {
         ...routebookResultPlan,
+        artifactCandidateFilePath: expect.stringMatching(
+          /^generated\/\.flowos-[a-f0-9]{16}\.candidate\.html$/,
+        ),
         workspaceDir: "/trusted/workspace",
       },
     });
+    expect(owner.subagent.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runTimeoutSeconds: 30 * 60,
+        message: expect.stringContaining("artifactCandidatePath="),
+      }),
+    );
     await spawnRoutebook(owner);
     expect(owner.subagent.run).toHaveBeenCalledOnce();
     await expect(
@@ -885,7 +921,7 @@ describe("FlowOS Execution plugin boundaries", () => {
 
     expect(owner.validateArtifact).toHaveBeenCalledWith({
       spaceId: unicodeSpaceId,
-      filePath: routebookResultPlan.artifactFilePath,
+      filePath: binding!.finalizationPlan!.artifactCandidateFilePath,
       artifactType: "html",
     });
     expect(assist.calls.filter((call) => call.path.endsWith("/space-artifacts"))).toHaveLength(1);
@@ -909,6 +945,8 @@ describe("FlowOS Execution plugin boundaries", () => {
     const owner = tools({ client: assist.client, validateArtifact, deliverResultCard });
     await startRoutebookExecution(owner.byName);
     await spawnRoutebook(owner);
+    const initial = await owner.bindings.byExecution("execution-1", "attempt-1");
+    await owner.bindings.save({ ...initial!, validationRepairCount: 2 });
     const binding = await owner.bindings.byExecution("execution-1", "attempt-1");
     await owner.runtime.subagentEnded(
       {
@@ -933,6 +971,51 @@ describe("FlowOS Execution plugin boundaries", () => {
     });
   });
 
+  it("resumes the same child to repair a rejected planned routebook before failing", async () => {
+    const assist = fakeClient();
+    let validationAttempts = 0;
+    const validateArtifact = vi.fn<ArtifactValidator>(async () => {
+      validationAttempts += 1;
+      if (validationAttempts === 1) {
+        throw new Error("validator rejected: update the card time");
+      }
+      return { validatorId: "lushu-html-v1", contentSha256: "b".repeat(64) };
+    });
+    const owner = tools({ client: assist.client, validateArtifact });
+    await startRoutebookExecution(owner.byName);
+    await spawnRoutebook(owner);
+    const first = await owner.bindings.byExecution("execution-1", "attempt-1");
+
+    await owner.runtime.subagentEnded(
+      {
+        targetSessionKey: first!.childSessionKey!,
+        targetKind: "subagent",
+        runId: first!.runId,
+        outcome: "ok",
+      },
+      { childSessionKey: first!.childSessionKey },
+    );
+
+    const repair = await owner.bindings.byExecution("execution-1", "attempt-1");
+    expect(repair).toMatchObject({ status: "RUNNING", validationRepairCount: 1 });
+    expect(repair!.runId).not.toBe(first!.runId);
+    expect(owner.subagent.run).toHaveBeenCalledTimes(2);
+    expect(owner.subagent.run.mock.calls[1]?.[0].message).toContain("update the card time");
+    expect(assist.calls.some((call) => call.path.endsWith("/fail"))).toBe(false);
+
+    await owner.runtime.subagentEnded(
+      {
+        targetSessionKey: repair!.childSessionKey!,
+        targetKind: "subagent",
+        runId: repair!.runId,
+        outcome: "ok",
+      },
+      { childSessionKey: repair!.childSessionKey },
+    );
+
+    expect(assist.getItem()).toMatchObject({ status: "SUCCEEDED" });
+  });
+
   it("recovers a lost planned validation failure response after Gateway restart", async () => {
     let loseFailureResponse = true;
     const assist = fakeClient({
@@ -949,6 +1032,8 @@ describe("FlowOS Execution plugin boundaries", () => {
     const owner = tools({ client: assist.client, validateArtifact });
     await startRoutebookExecution(owner.byName);
     await spawnRoutebook(owner);
+    const initial = await owner.bindings.byExecution("execution-1", "attempt-1");
+    await owner.bindings.save({ ...initial!, validationRepairCount: 2 });
     const binding = await owner.bindings.byExecution("execution-1", "attempt-1");
     await owner.runtime.subagentEnded(
       {
@@ -973,7 +1058,12 @@ describe("FlowOS Execution plugin boundaries", () => {
       owner.deliverResultCard,
       { warn: vi.fn(), info: vi.fn() },
       owner.locks,
-      () => validateArtifact(routebookResultPlan),
+      () =>
+        validateArtifact({
+          spaceId: routebookResultPlan.spaceId,
+          filePath: routebookResultPlan.artifactFilePath,
+          artifactType: routebookResultPlan.artifactType,
+        }),
     );
     await restarted.reconcile();
     expect(assist.calls.filter((call) => call.path.endsWith("/fail"))).toHaveLength(1);
@@ -1064,7 +1154,6 @@ describe("FlowOS Execution plugin boundaries", () => {
       owner.byName.get("flowos_execution_stage")?.execute("owner-stage", {
         executionId: "execution-1",
         attemptId: "attempt-1",
-        expectedVersion: 2,
         stageKey: "other",
         stageLabel: "其他阶段",
       }),
@@ -1199,7 +1288,7 @@ describe("FlowOS Execution plugin boundaries", () => {
     expect(owner.validateArtifact).not.toHaveBeenCalled();
   });
 
-  it("rejects stale and future writer versions without changing state", async () => {
+  it("resolves the live stage version inside the serialized plugin boundary", async () => {
     const assist = fakeClient();
     const owner = tools({ client: assist.client });
     await startExecution(owner.byName);
@@ -1208,27 +1297,60 @@ describe("FlowOS Execution plugin boundaries", () => {
       stageKey: "runtime-stage",
       stageLabel: "运行时已推进",
     });
-    await expect(
-      owner.byName.get("flowos_execution_stage")?.execute("stale", {
-        executionId: "execution-1",
-        attemptId: "attempt-1",
-        expectedVersion: 1,
-        stageKey: "stale",
-        stageLabel: "错误旧阶段",
-      }),
-    ).rejects.toThrow("does not match");
-    expect(assist.getItem()).toMatchObject({ version: 2, stageKey: "runtime-stage" });
+    await owner.byName.get("flowos_execution_stage")?.execute("next", {
+      executionId: "execution-1",
+      attemptId: "attempt-1",
+      stageKey: "next",
+      stageLabel: "继续执行",
+    });
+    expect(assist.getItem()).toMatchObject({ version: 3, stageKey: "next" });
+    expect(assist.calls.findLast((call) => call.path.endsWith("/stage"))?.payload).toMatchObject({
+      expectedVersion: 2,
+      stageKey: "next",
+    });
+  });
 
-    await expect(
-      owner.byName.get("flowos_execution_stage")?.execute("future", {
-        executionId: "execution-1",
-        attemptId: "attempt-1",
-        expectedVersion: 99,
-        stageKey: "future",
-        stageLabel: "错误未来版本",
-      }),
-    ).rejects.toThrow("does not match");
-    expect(assist.getItem()).toMatchObject({ version: 2, stageKey: "runtime-stage" });
+  it("fences Assist before stopping the bound worker on user cancellation", async () => {
+    const assist = fakeClient();
+    assist.setItem({ status: "RUNNING", version: 3, stageKey: "generating" });
+    const bindings = new RunBindingStore(memoryStore());
+    const subagent = fakeSubagent();
+    const runtime = new FlowosExecutionRuntime(
+      assist.client,
+      bindings,
+      subagent as never,
+      fakeSystem() as never,
+      vi.fn(),
+      { warn: vi.fn(), info: vi.fn() },
+      new ExecutionLocks(),
+    );
+    await bindings.save({
+      executionId: "execution-1",
+      attemptId: "attempt-1",
+      requesterSessionKey: "agent:main:main",
+      ownerAgentId: "agent:main",
+      targetAgentId: "main",
+      childSessionKey: "agent:main:subagent:flowos-1",
+      runId: "run-1",
+      status: "RUNNING",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const cancelled = await runtime.cancelExecution("execution-1");
+
+    expect(cancelled.status).toBe("CANCELLED");
+    expect(assist.calls.find((call) => call.path.endsWith("/cancel"))?.payload).toEqual({
+      expectedVersion: 3,
+    });
+    expect(subagent.deleteSession).toHaveBeenCalledWith({
+      sessionKey: "agent:main:subagent:flowos-1",
+      deleteTranscript: false,
+    });
+    expect(await bindings.byExecution("execution-1", "attempt-1")).toMatchObject({
+      status: "ENDED_ERROR",
+      outcome: "killed",
+    });
   });
 
   it("complete registers the bound Space Artifact before completing the owner Execution", async () => {
@@ -1380,7 +1502,6 @@ describe("FlowOS Execution plugin boundaries", () => {
       owner.byName.get("flowos_execution_stage")?.execute("late-owner-stage", {
         executionId: "execution-1",
         attemptId: "attempt-1",
-        expectedVersion: 2,
         stageKey: "late",
         stageLabel: "迟到阶段",
       }),
@@ -1693,7 +1814,6 @@ describe("FlowOS Execution typed hooks", () => {
     await validationEntered;
     const lateStage = child.byName.get("flowos_execution_stage")!.execute("late-stage", {
       executionId: "execution-1",
-      expectedVersion: 1,
       stageKey: "late",
       stageLabel: "迟到阶段",
     });

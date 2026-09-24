@@ -10790,13 +10790,13 @@ describe("buildOpenAICompletionsParams sanitizes reasoning replay fields", () =>
   } satisfies Model<"openai-completions">;
 
   const nativeDeepSeekModel = {
-    id: "deepseek-v4-flash",
-    name: "DeepSeek V4 Flash",
+    id: "deepseek-flash",
+    name: "DeepSeek-V4.1-Flash",
     api: "openai-completions",
     provider: "deepseek",
     baseUrl: "https://api.deepseek.com",
     reasoning: true,
-    input: ["text"],
+    input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 1_000_000,
     maxTokens: 384_000,

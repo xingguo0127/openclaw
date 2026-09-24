@@ -687,6 +687,7 @@ async function registerPluginSubagentRunFromGateway(params: {
   task: string;
   requesterOrigin?: DeliveryContext;
   pluginId?: string;
+  runTimeoutSeconds?: number;
 }): Promise<void> {
   const childSessionKey = params.childSessionKey.trim();
   if (!childSessionKey) {
@@ -707,6 +708,9 @@ async function registerPluginSubagentRunFromGateway(params: {
     task: params.task,
     cleanup: "keep",
     ...(params.pluginId ? { label: `plugin:${params.pluginId}` } : {}),
+    ...(params.runTimeoutSeconds !== undefined
+      ? { runTimeoutSeconds: params.runTimeoutSeconds }
+      : {}),
     expectsCompletionMessage: false,
     spawnMode: "run",
   });
@@ -2648,6 +2652,10 @@ export const agentHandlers: GatewayRequestHandlers = {
               threadId: resolvedThreadId,
             }),
             pluginId: normalizeOptionalString(client?.internal?.pluginRuntimeOwnerId),
+            runTimeoutSeconds:
+              typeof request.timeout === "number" && Number.isFinite(request.timeout)
+                ? Math.max(0, Math.floor(request.timeout))
+                : undefined,
           });
         } catch (err) {
           context.logGateway.warn(

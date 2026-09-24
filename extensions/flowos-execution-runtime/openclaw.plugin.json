@@ -14,6 +14,7 @@
       "flowos_execution_complete",
       "flowos_execution_fail",
       "flowos_image_generate",
+      "flowos_agent_avatar_apply",
       "space_read",
       "space_material_ingest",
       "space_artifact_publish"

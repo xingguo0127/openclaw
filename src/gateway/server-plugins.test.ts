@@ -1003,6 +1003,20 @@ describe("loadGatewayPlugins", () => {
     expect(params.deliver).toBe(false);
   });
 
+  test("forwards a bounded plugin subagent run timeout", async () => {
+    const serverPlugins = serverPluginsModule;
+    const runtime = await createSubagentRuntime(serverPlugins);
+    serverPlugins.setFallbackGatewayContext(createTestContext("run-timeout-forward"));
+
+    await runtime.run({
+      sessionKey: "s-run-timeout",
+      message: "hello",
+      runTimeoutSeconds: 1_800.9,
+    });
+
+    expect(getRequiredLastDispatchedParams().timeout).toBe(1_800);
+  });
+
   test("generates a non-empty idempotencyKey when the caller omits it", async () => {
     const serverPlugins = serverPluginsModule;
     const runtime = await createSubagentRuntime(serverPlugins);

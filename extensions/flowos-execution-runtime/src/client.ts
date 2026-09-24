@@ -213,4 +213,14 @@ export class FlowosExecutionClient {
       ),
     );
   }
+
+  async cancel(executionId: string, expectedVersion: number): Promise<ActiveExecution> {
+    return requireExecution(
+      await this.request(
+        "POST",
+        `/api/executions/writer/${encodeURIComponent(executionId)}/cancel`,
+        { expectedVersion },
+      ),
+    );
+  }
 }

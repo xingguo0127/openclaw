@@ -167,6 +167,27 @@ type ControlUiAvatarMeta = {
   avatarReason: string | null;
 };
 
+function decodeAvatarDataUrl(value: string): { body: Buffer; contentType: string } | null {
+  const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]*={0,2})$/i.exec(value);
+  if (!match) {
+    return null;
+  }
+  const encoded = match[2];
+  if (!encoded || encoded.length > Math.ceil(AVATAR_MAX_BYTES / 3) * 4 + 4) {
+    return null;
+  }
+  const body = Buffer.from(encoded, "base64");
+  const canonical = encoded.replace(/=+$/, "");
+  if (
+    body.length === 0 ||
+    body.length > AVATAR_MAX_BYTES ||
+    body.toString("base64").replace(/=+$/, "") !== canonical
+  ) {
+    return null;
+  }
+  return { body, contentType: match[1].toLowerCase() };
+}
+
 function controlUiAvatarResolutionMeta(resolved: ControlUiAvatarResolution | null): {
   avatarSource: string | null;
   avatarStatus: ControlUiAvatarResolution["kind"] | null;
@@ -712,6 +733,19 @@ export async function handleControlUiAvatarRequest(
   }
 
   const resolved = opts.resolveAvatar(agentId);
+  if (resolved.kind === "data") {
+    const decoded = decodeAvatarDataUrl(resolved.url);
+    if (!decoded) {
+      respondControlUiNotFound(res);
+      return true;
+    }
+    res.statusCode = 200;
+    res.setHeader("Content-Type", decoded.contentType);
+    res.setHeader("Content-Length", String(decoded.body.length));
+    res.setHeader("Cache-Control", "no-cache");
+    res.end(req.method === "HEAD" ? undefined : decoded.body);
+    return true;
+  }
   if (resolved.kind !== "local") {
     respondControlUiNotFound(res);
     return true;

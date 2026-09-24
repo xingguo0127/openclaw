@@ -1338,10 +1338,10 @@ describe("explicit live model discovery scope", () => {
     expect(
       findUnmatchedExplicitLiveModelRefs({
         refs: [
-          { provider: "deepseek", id: "deepseek-v4-flash" },
+          { provider: "deepseek", id: "deepseek-flash" },
           { provider: "zai", id: "glm-5.1" },
         ],
-        models: [{ provider: "deepseek", id: "deepseek-v4-flash" }],
+        models: [{ provider: "deepseek", id: "deepseek-flash" }],
         env: {},
       }),
     ).toEqual(["zai/glm-5.1"]);
@@ -1524,7 +1524,9 @@ async function completeOkWithRetry(params: {
 function isDeepSeekV4Model(model: Pick<Model, "id" | "provider">): boolean {
   return (
     model.provider === "deepseek" &&
-    (model.id === "deepseek-v4-flash" || model.id === "deepseek-v4-pro")
+    (model.id === "deepseek-flash" ||
+      model.id === "deepseek-v4-flash" ||
+      model.id === "deepseek-v4-pro")
   );
 }
 

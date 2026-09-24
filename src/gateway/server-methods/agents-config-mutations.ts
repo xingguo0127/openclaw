@@ -74,9 +74,13 @@ export async function updateAgentConfigEntry(params: {
   workspace?: string;
   model?: string;
   identity?: IdentityConfig;
+  allowConfigSizeDrop?: boolean;
 }): Promise<void> {
   await mutateConfigFileWithRetry({
     afterWrite: { mode: "auto" },
+    writeOptions: {
+      allowConfigSizeDrop: params.allowConfigSizeDrop,
+    },
     mutate: (draft) => {
       if (!isConfiguredAgent(draft, params.agentId)) {
         throw new AgentConfigPreconditionError("not-found", params.agentId);

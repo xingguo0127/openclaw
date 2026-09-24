@@ -934,15 +934,15 @@ describe("applyExtraParamsToAgent", () => {
     ]);
   });
 
-  it("fills DeepSeek V4 reasoning_content for unowned OpenAI-compatible proxy models", () => {
+  it("fills DeepSeek Flash 4.1 reasoning_content for unowned OpenAI-compatible proxy models", () => {
     const payload = runResponsesPayloadMutationCase({
       applyProvider: "opencode",
-      applyModelId: "deepseek-v4-pro",
+      applyModelId: "deepseek-flash",
       thinkingLevel: "high",
       model: {
         api: "openai-completions",
         provider: "opencode",
-        id: "deepseek-v4-pro",
+        id: "deepseek-flash",
       } as Model<"openai-completions">,
       payload: {
         messages: [

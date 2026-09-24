@@ -23,7 +23,7 @@ const HIGH_SIGNAL_LIVE_MODEL_PRIORITY = [
   "google/gemini-3-flash-preview",
   "moonshot/kimi-k2.7-code",
   "anthropic/claude-opus-4-6",
-  "deepseek/deepseek-v4-flash",
+  "deepseek/deepseek-flash",
   "deepseek/deepseek-v4-pro",
   "minimax/minimax-m3",
   "openai/gpt-5.5",

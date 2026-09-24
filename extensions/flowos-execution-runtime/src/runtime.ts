@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import {
   type FinalizationPlan,
@@ -15,6 +16,8 @@ const activeStatuses = new Set(["QUEUED", "PLANNING", "RUNNING", "AWAITING_USER"
 const spawnGuardMs = 60_000;
 const closureGuardMs = 60_000;
 const maxClosureWakeRetries = 2;
+const maxValidationRepairRetries = 2;
+const routebookRepairTimeoutSeconds = 30 * 60;
 
 type RuntimeLogger = {
   warn(message: string): void;
@@ -34,6 +37,7 @@ type ResultCardDelivery = (params: {
 }) => Promise<void>;
 
 type PlannedArtifactValidator = (plan: FinalizationPlan) => Promise<SpaceArtifactValidation>;
+type PlannedArtifactDiscarder = (plan: FinalizationPlan) => Promise<void> | void;
 
 type EndedEvent = {
   targetSessionKey: string;
@@ -100,6 +104,7 @@ export class FlowosExecutionRuntime {
     private readonly logger: RuntimeLogger,
     private readonly locks: ExecutionLocks,
     private readonly validatePlannedArtifact?: PlannedArtifactValidator,
+    private readonly discardPlannedArtifact?: PlannedArtifactDiscarder,
   ) {}
 
   async subagentEnded(event: EndedEvent, ctx: SubagentContext): Promise<void> {
@@ -197,6 +202,50 @@ export class FlowosExecutionRuntime {
     };
     await this.bindings.save(failed);
     this.markTerminal(failed);
+  }
+
+  async cancelExecution(executionId: string): Promise<ActiveExecution> {
+    const initial = await this.client.detail(executionId);
+    const attemptId = initial.currentAttemptId;
+    if (!attemptId) {
+      throw new Error("FlowOS Execution has no active Attempt");
+    }
+    let childSessionKey: string | undefined;
+    let stoppedBinding: RunBinding | undefined;
+    const cancelled = await this.locks.run(executionId, attemptId, async () => {
+      const current = await this.client.detail(executionId);
+      if (current.currentAttemptId !== attemptId) {
+        throw new Error("FlowOS Execution Attempt changed before cancellation");
+      }
+      const item = await this.client.cancel(executionId, current.version);
+      const binding = await this.bindings.byExecution(executionId, attemptId);
+      if (binding && !terminal(binding)) {
+        childSessionKey = binding.childSessionKey;
+        const stopped: RunBinding = {
+          ...binding,
+          status: "ENDED_ERROR",
+          outcome: "killed",
+          updatedAt: Date.now(),
+        };
+        await this.bindings.save(stopped);
+        stoppedBinding = stopped;
+        this.markTerminal(stopped);
+      }
+      return item;
+    });
+    if (childSessionKey) {
+      await this.subagent
+        .deleteSession({ sessionKey: childSessionKey, deleteTranscript: false })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `FlowOS Execution worker stop failed for ${executionId}: ${error instanceof Error ? error.message : "error"}`,
+          );
+        });
+    }
+    if (stoppedBinding) {
+      await this.discardCandidate(stoppedBinding);
+    }
+    return cancelled;
   }
 
   async prepareAndCompleteResult(
@@ -398,6 +447,7 @@ export class FlowosExecutionRuntime {
               expectedVersion: detail.version,
               stageKey: "validating",
               stageLabel: "正在验证结果",
+              progress: 0.95,
             });
             syncedVersion = validating.version;
           }
@@ -408,6 +458,7 @@ export class FlowosExecutionRuntime {
             ...failure,
           });
           syncedVersion = failed.version;
+          await this.discardCandidate(binding);
         }
       }
       await this.bindings.save({
@@ -534,6 +585,10 @@ export class FlowosExecutionRuntime {
     try {
       validation = await this.validatePlannedArtifact(plan);
     } catch (error) {
+      if (await this.retryPlannedValidationLocked(binding, error)) {
+        return;
+      }
+      await this.discardCandidate(binding);
       const failedValidation: RunBinding = {
         ...binding,
         finalizationFailure: {
@@ -569,6 +624,68 @@ export class FlowosExecutionRuntime {
         caption: plan.cardCaption,
       },
     });
+    await this.discardCandidate(binding);
+  }
+
+  private async retryPlannedValidationLocked(
+    binding: RunBinding,
+    error: unknown,
+  ): Promise<boolean> {
+    const plan = binding.finalizationPlan;
+    const childSessionKey = binding.childSessionKey;
+    const repairCount = binding.validationRepairCount ?? 0;
+    if (!plan || !childSessionKey || repairCount >= maxValidationRepairRetries) {
+      return false;
+    }
+    const nextRepairCount = repairCount + 1;
+    const candidatePath = resolve(
+      plan.workspaceDir,
+      "spaces",
+      plan.spaceId,
+      ...plan.artifactCandidateFilePath.split("/"),
+    );
+    const reason = error instanceof Error ? error.message : "validator rejected the candidate";
+    const run = await this.subagent.run({
+      sessionKey: childSessionKey,
+      message:
+        `[FlowOS validation repair ${nextRepairCount}/${maxValidationRepairRetries}]\n` +
+        `The trusted Runtime validator rejected ${candidatePath}.\n` +
+        `${reason}\n\n` +
+        "Repair the candidate in place, rerun validate-lushu.sh, and end only after EXIT 0. " +
+        "Do not write the published artifact path and do not complete or fail the Execution.",
+      deliver: false,
+      lightContext: true,
+      lane: `flowos-execution:${binding.executionId}`,
+      idempotencyKey: `flowos-validation-repair:${binding.executionId}:${binding.attemptId}:${nextRepairCount}`,
+      runTimeoutSeconds: routebookRepairTimeoutSeconds,
+    });
+    const retrying: RunBinding = {
+      ...binding,
+      runId: run.runId,
+      status: "RUNNING",
+      outcome: undefined,
+      closureWakeCount: 0,
+      validationRepairCount: nextRepairCount,
+      updatedAt: Date.now(),
+    };
+    await this.bindings.save(retrying);
+    this.logger.info(
+      `FlowOS Execution resumed ${binding.executionId} for planned validation repair ${nextRepairCount}`,
+    );
+    return true;
+  }
+
+  private async discardCandidate(binding: RunBinding): Promise<void> {
+    if (!binding.finalizationPlan || !this.discardPlannedArtifact) {
+      return;
+    }
+    try {
+      await this.discardPlannedArtifact(binding.finalizationPlan);
+    } catch (error) {
+      this.logger.warn(
+        `FlowOS Execution candidate cleanup failed for ${binding.executionId}: ${error instanceof Error ? error.message : "error"}`,
+      );
+    }
   }
 
   private async syncPlannedFailureLocked(binding: RunBinding): Promise<void> {

@@ -25,6 +25,25 @@ type GeneratedAsset = {
   sha256: string;
 };
 
+function requireReferenceAssetRefs(value: Record<string, unknown>): string[] {
+  const refs = value.referenceAssetRefs;
+  if (
+    !Array.isArray(refs) ||
+    refs.length < 1 ||
+    refs.length > 4 ||
+    refs.some(
+      (ref) =>
+        typeof ref !== "string" ||
+        !/^(?:media:\/\/chat\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp|gif)|media:\/\/generated\/[A-Za-z0-9_-]+)$/.test(
+          ref,
+        ),
+    )
+  ) {
+    throw new Error("Assist returned invalid image reference metadata");
+  }
+  return refs as string[];
+}
+
 export class ImageGenerationRunStore {
   private readonly runs = new Map<string, ActiveRun>();
 
@@ -109,29 +128,46 @@ export function createImageGenerationTool(params: {
     name: "flowos_image_generate",
     label: "FlowOS Image Generate",
     description:
-      "Create or edit one image for an explicit FlowOS user request and deliver a durable media card. For editing, pass referenceImages copied from the user photo URLs or previous media://generated/ result. Never omit the reference and recreate from text.",
+      "Primary image generation and editing tool for explicit FlowOS user chat requests, including Agent avatars. Use this instead of image_generate. For editing, pass referenceImages copied from user photo URLs or a previous media://generated/ result; never recreate the reference from text.",
     executionMode: "sequential",
     parameters: Type.Object(
-      { prompt: Type.String({ minLength: 1, maxLength: 4000 }),
-        referenceImages: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2048 }), { minItems: 1, maxItems: 4 })) },
+      {
+        prompt: Type.String({ minLength: 1, maxLength: 4000 }),
+        referenceImages: Type.Optional(
+          Type.Array(Type.String({ minLength: 1, maxLength: 2048 }), {
+            minItems: 1,
+            maxItems: 4,
+          }),
+        ),
+      },
       { additionalProperties: false },
     ),
     async execute(_toolCallId, args) {
       const active = params.runs.require(params.context, params.ownerAgentId);
-      const prompt = (args as { prompt: string }).prompt.trim();
-      const inputs = (args as { referenceImages?: string[] }).referenceImages;
+      const input = args as { prompt: string; referenceImages?: string[] };
+      const prompt = input.prompt.trim();
+      const idempotencyKey = operationKey(active);
       let referenceAssetRefs: string[] = [];
+      const inputs = input.referenceImages;
       if (inputs !== undefined) {
-        if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > 4 || inputs.some((v) => typeof v !== "string" || v.length > 2048)) {
+        if (
+          !Array.isArray(inputs) ||
+          inputs.length < 1 ||
+          inputs.length > 4 ||
+          inputs.some((value) => typeof value !== "string" || value.length > 2048)
+        ) {
           throw new Error("Invalid referenceImages");
         }
-        const resolved = await params.request("POST", "/api/platform/capabilities/image.generate.v1/references", { referenceImages: inputs });
-        if (!Array.isArray(resolved.referenceAssetRefs) || resolved.referenceAssetRefs.length !== inputs.length || resolved.referenceAssetRefs.some((v) => typeof v !== "string" || !v.startsWith("media://"))) {
-          throw new Error("Invalid image reference response");
+        const normalized = await params.request(
+          "POST",
+          "/api/platform/capabilities/image.generate.v1/references",
+          { referenceImages: inputs },
+        );
+        referenceAssetRefs = requireReferenceAssetRefs(normalized);
+        if (referenceAssetRefs.length !== inputs.length) {
+          throw new Error("Assist returned invalid image reference metadata");
         }
-        referenceAssetRefs = resolved.referenceAssetRefs as string[];
       }
-      const idempotencyKey = operationKey(active);
       const response = await params.request(
         "POST",
         "/api/platform/capabilities/image.generate.v1/generate",
@@ -179,6 +215,48 @@ export function createImageGenerationTool(params: {
         traceId: response.traceId,
         assetRef: assets[0].assetRef,
         delivered: true,
+      });
+    },
+  };
+}
+
+export function createAgentAvatarApplyTool(params: {
+  context: OpenClawPluginToolContext;
+  request: AssistRequest;
+  runs: ImageGenerationRunStore;
+  ownerAgentId: string;
+}): AnyAgentTool {
+  return {
+    name: "flowos_agent_avatar_apply",
+    label: "FlowOS Apply Agent Avatar",
+    description:
+      "Apply a FlowOS generated image to the current Agent avatar after the owner selects or confirms it. Pass the media://generated assetRef returned by flowos_image_generate.",
+    executionMode: "sequential",
+    parameters: Type.Object(
+      {
+        assetRef: Type.String({
+          minLength: 20,
+          maxLength: 240,
+          pattern: "^media://generated/[A-Za-z0-9][A-Za-z0-9._-]*$",
+        }),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_toolCallId, args) {
+      params.runs.require(params.context, params.ownerAgentId);
+      const input = args as { assetRef: string };
+      const response = await params.request(
+        "POST",
+        "/api/platform/capabilities/image.generate.v1/apply-agent-avatar",
+        { agentId: "main", assetRef: input.assetRef },
+      );
+      if (response.ok !== true || response.agentId !== "main") {
+        throw new Error("Assist returned an invalid Agent avatar apply result");
+      }
+      return jsonResult({
+        status: "succeeded",
+        agentId: "main",
+        assetRef: input.assetRef,
       });
     },
   };

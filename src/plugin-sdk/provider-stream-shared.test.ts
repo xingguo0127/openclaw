@@ -161,6 +161,31 @@ describe("isOpenAICompatibleThinkingEnabled", () => {
 });
 
 describe("createDeepSeekV4OpenAICompatibleThinkingWrapper", () => {
+  it.each([
+    ["minimal", "low"],
+    ["low", "low"],
+    ["medium", "high"],
+    ["high", "high"],
+    ["xhigh", "max"],
+    ["max", "max"],
+  ] as const)("maps OpenClaw %s thinking to DeepSeek %s effort", (thinkingLevel, expected) => {
+    const payload: Record<string, unknown> = { messages: [] };
+    const baseStreamFn: StreamFn = (_model, _context, options) => {
+      options?.onPayload?.(payload, _model);
+      return {} as ReturnType<StreamFn>;
+    };
+
+    const wrapped = createDeepSeekV4OpenAICompatibleThinkingWrapper({
+      baseStreamFn,
+      thinkingLevel,
+      shouldPatchModel: () => true,
+    });
+    void wrapped?.({} as never, {} as never, {});
+
+    expect(payload.thinking).toEqual({ type: "enabled" });
+    expect(payload.reasoning_effort).toBe(expected);
+  });
+
   it("backfills reasoning_content on every replayed assistant message when thinking is enabled", () => {
     const payload = {
       messages: [

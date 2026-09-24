@@ -424,6 +424,9 @@ function isDisabledDeepSeekV4ThinkingLevel(thinkingLevel: DeepSeekV4ThinkingLeve
 function resolveDeepSeekV4ReasoningEffort(
   thinkingLevel: DeepSeekV4ThinkingLevel,
 ): DeepSeekV4ReasoningEffort {
+  if (thinkingLevel === "minimal" || thinkingLevel === "low") {
+    return "low";
+  }
   return thinkingLevel === "xhigh" || thinkingLevel === "max" ? "max" : "high";
 }
 

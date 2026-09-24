@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   applyAgentConfig: vi.fn((_cfg: unknown, _opts: unknown) => ({})),
   pruneAgentConfig: vi.fn(() => ({ config: {}, removedBindings: 0 })),
   writeConfigFile: vi.fn(async (_nextConfig?: unknown) => {}),
+  mutateConfigOptions: [] as Array<Record<string, unknown>>,
   ensureAgentWorkspace: vi.fn(
     async (params?: { dir?: string }): Promise<{ dir: string; identityPathCreated: boolean }> => ({
       dir: params?.dir
@@ -76,7 +77,9 @@ vi.mock("../../config/config.js", async () => {
       await mocks.writeConfigFile(params.nextConfig),
     mutateConfigFileWithRetry: async (params: {
       mutate: (draft: Record<string, unknown>, context: unknown) => unknown;
+      writeOptions?: { allowConfigSizeDrop?: boolean };
     }) => {
+      mocks.mutateConfigOptions.push(params as unknown as Record<string, unknown>);
       const draft = structuredClone(mocks.loadConfigReturn);
       const result = await params.mutate(draft, {
         snapshot: { path: "/tmp/openclaw/config.json" },
@@ -745,6 +748,7 @@ describe("agents.create", () => {
 describe("agents.update", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.mutateConfigOptions.length = 0;
     mocks.loadConfigReturn = {
       agents: {
         list: [
@@ -847,6 +851,34 @@ describe("agents.update", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  it("allows the intentional size drop when migrating an inline avatar to a workspace file", async () => {
+    mocks.loadConfigReturn = {
+      agents: {
+        list: [
+          {
+            id: "test-agent",
+            workspace: "/workspace/test-agent",
+            identity: { avatar: "data:image/jpeg;base64,AAAA" },
+          },
+        ],
+      },
+    };
+    const { respond, promise } = makeCall("agents.update", {
+      agentId: "test-agent",
+      avatar: ".flowos/avatars/media-avatar.jpg",
+    });
+    await promise;
+
+    expectRespondOk(respond, { ok: true, agentId: "test-agent" });
+    expect(
+      (
+        mocks.mutateConfigOptions.at(-1)?.writeOptions as
+          | { allowConfigSizeDrop?: boolean }
+          | undefined
+      )?.allowConfigSizeDrop,
+    ).toBe(true);
   });
 
   it("writes merged identity to IDENTITY.md when only emoji changes", async () => {

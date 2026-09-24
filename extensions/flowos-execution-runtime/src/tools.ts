@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { posix, resolve } from "node:path";
 import { jsonResult } from "openclaw/plugin-sdk/core";
 import type {
   AnyAgentTool,
@@ -21,6 +22,7 @@ import type { SpaceArtifactValidation } from "./validation.js";
 
 const activeStatuses = new Set(["QUEUED", "PLANNING", "RUNNING", "AWAITING_USER", "PAUSED"]);
 const plannedRoutebookTaskKind = "ROUTEBOOK_GENERATION";
+const routebookRunTimeoutSeconds = 30 * 60;
 const errorCodes = [
   "AUTHORIZATION_DENIED",
   "GRANT_EXPIRED",
@@ -77,9 +79,24 @@ function sameFinalizationPlan(
     actual.spaceId === expected.spaceId &&
     actual.artifactTitle === expected.artifactTitle &&
     actual.artifactFilePath === expected.artifactFilePath &&
+    actual.artifactCandidateFilePath === expected.artifactCandidateFilePath &&
     actual.artifactType === expected.artifactType &&
     actual.cardCaption === expected.cardCaption
   );
+}
+
+function candidateArtifactFilePath(filePath: string, attemptId: string): string {
+  const parts = filePath.split("/");
+  if (
+    parts[0] !== "generated" ||
+    parts.length < 2 ||
+    parts.some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new Error("Space Artifact filePath must be a generated relative path");
+  }
+  const extension = posix.extname(filePath);
+  const digest = createHash("sha256").update(attemptId).digest("hex").slice(0, 16);
+  return posix.join(posix.dirname(filePath), `.flowos-${digest}.candidate${extension}`);
 }
 
 function contextAgentId(context: OpenClawPluginToolContext): string {
@@ -143,7 +160,7 @@ async function requireStageBinding(
 async function requireCurrentExecution(
   deps: ToolDeps,
   binding: RunBinding,
-  expectedVersion: number,
+  expectedVersion?: number,
 ): Promise<ActiveExecution> {
   const detail = await deps.client.detail(binding.executionId);
   if (
@@ -153,7 +170,7 @@ async function requireCurrentExecution(
   ) {
     throw new Error("FlowOS Execution is no longer active for this binding");
   }
-  if (expectedVersion !== detail.version) {
+  if (expectedVersion !== undefined && expectedVersion !== detail.version) {
     throw new Error("expectedVersion does not match the current FlowOS Execution");
   }
   return detail;
@@ -276,7 +293,6 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
       {
         executionId: Type.String({ minLength: 1, maxLength: 128 }),
         attemptId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-        expectedVersion: Type.Integer({ minimum: 1 }),
         stageKey: Type.String({ minLength: 1, maxLength: 64 }),
         stageLabel: Type.String({ minLength: 1, maxLength: 120 }),
         progress: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
@@ -287,7 +303,6 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
       const params = args as {
         executionId: string;
         attemptId?: string;
-        expectedVersion: number;
         stageKey: string;
         stageLabel: string;
         progress?: number;
@@ -299,7 +314,9 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
       }
       return await deps.locks.run(params.executionId, lockAttemptId, async () => {
         const binding = await requireStageBinding(deps, params.executionId, params.attemptId);
-        const current = await requireCurrentExecution(deps, binding, params.expectedVersion);
+        // The plugin serializes stage writers and resolves the live version here.
+        // Agent prompts must not carry a CAS token that expires after their first update.
+        const current = await requireCurrentExecution(deps, binding);
         const latestBinding = await deps.bindings.byExecution(
           binding.executionId,
           binding.attemptId,
@@ -369,7 +386,14 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
       const requesterSessionKey = requireOwnerContext(deps.context, deps.ownerAgentId);
       const targetAgentId = normalizeChildAgentId(params.agentId);
       const finalizationPlan = params.resultPlan
-        ? { ...params.resultPlan, workspaceDir: requireWorkspaceDir(deps.context) }
+        ? {
+            ...params.resultPlan,
+            artifactCandidateFilePath: candidateArtifactFilePath(
+              params.resultPlan.artifactFilePath,
+              params.attemptId,
+            ),
+            workspaceDir: requireWorkspaceDir(deps.context),
+          }
         : undefined;
       let rejected: { error: unknown; binding: RunBinding } | undefined;
       const result = await deps.locks.run(params.executionId, params.attemptId, async () => {
@@ -428,16 +452,31 @@ export function createFlowosExecutionTools(deps: ToolDeps): AnyAgentTool[] {
         }
         let run: { runId: string };
         try {
+          const plannedOutputContract = finalizationPlan
+            ? "\n\n[FlowOS trusted output contract]\n" +
+              `artifactCandidatePath=${resolve(
+                finalizationPlan.workspaceDir,
+                "spaces",
+                finalizationPlan.spaceId,
+                ...finalizationPlan.artifactCandidateFilePath.split("/"),
+              )}\n` +
+              `artifactFinalPath=${finalizationPlan.artifactFilePath}\n` +
+              "Write and validate only artifactCandidatePath. Never write artifactFinalPath; Runtime promotes the validated candidate atomically."
+            : "";
           run = await deps.api.runtime.subagent.run({
             sessionKey: childKey,
             message:
-              `[FlowOS Execution]\nexecutionId=${params.executionId}\nattemptId=${params.attemptId}\nexpectedVersion=${detail.version}\n` +
+              `[FlowOS Execution]\nexecutionId=${params.executionId}\nattemptId=${params.attemptId}\n` +
               "Only report structured progress with flowos_execution_stage. Do not complete or fail the Execution.\n\n" +
-              params.task,
+              params.task +
+              plannedOutputContract,
             deliver: false,
             lightContext: true,
             lane: `flowos-execution:${params.executionId}`,
             idempotencyKey: runId,
+            ...(current.taskKind === plannedRoutebookTaskKind && {
+              runTimeoutSeconds: routebookRunTimeoutSeconds,
+            }),
           });
         } catch (error) {
           const pending: RunBinding = {

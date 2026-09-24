@@ -21,7 +21,13 @@ export function buildDeepSeekModelDefinition(
   };
 }
 
-const DEEPSEEK_V4_MODEL_IDS = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
+const DEEPSEEK_V4_MODEL_IDS = new Set([
+  "deepseek-flash",
+  // Keep recognizing the retired id so pinned sessions and explicit user
+  // configuration retain the native thinking/replay contract.
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+]);
 
 export function isDeepSeekV4ModelId(modelId: string): boolean {
   return DEEPSEEK_V4_MODEL_IDS.has(modelId.toLowerCase());

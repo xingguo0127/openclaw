@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { validateSpaceArtifact } from "./validation.js";
+import { validateAndPromoteSpaceArtifact, validateSpaceArtifact } from "./validation.js";
 
 const roots: string[] = [];
 
@@ -58,14 +58,77 @@ describe("trusted Space Artifact validator", () => {
     await expect(
       validateSpaceArtifact({
         runtime: {
-          system: { runCommandWithTimeout: vi.fn(async () => ({ code: 1 })) },
+          system: {
+            runCommandWithTimeout: vi.fn(async () => ({
+              code: 1,
+              stdout: "FAIL: card time is not updated",
+              stderr: "",
+            })),
+          },
         } as never,
         workspaceDir,
         spaceId: "sp-trip",
         filePath: "generated/lushu.html",
         artifactType: "html",
       }),
-    ).rejects.toThrow("validator rejected");
+    ).rejects.toThrow("card time is not updated");
+  });
+
+  it("publishes a validated candidate atomically without consuming the retry source", async () => {
+    const { workspaceDir } = fixture("<html>old</html>");
+    const generated = join(workspaceDir, "spaces", "sp-trip", "generated");
+    writeFileSync(join(generated, ".lushu.attempt.candidate.html"), "<html>new</html>");
+
+    const result = await validateAndPromoteSpaceArtifact({
+      runtime: {
+        system: { runCommandWithTimeout: vi.fn(async () => ({ code: 0 })) },
+      } as never,
+      workspaceDir,
+      spaceId: "sp-trip",
+      candidateFilePath: "generated/.lushu.attempt.candidate.html",
+      filePath: "generated/lushu.html",
+      artifactType: "html",
+    });
+
+    expect(readFileSync(join(generated, "lushu.html"), "utf8")).toBe("<html>new</html>");
+    expect(readFileSync(join(generated, ".lushu.attempt.candidate.html"), "utf8")).toBe(
+      "<html>new</html>",
+    );
+    expect(result.contentSha256).toBe(
+      createHash("sha256").update("<html>new</html>").digest("hex"),
+    );
+  });
+
+  it("leaves the published artifact untouched when candidate validation fails", async () => {
+    const { workspaceDir } = fixture("<html>last-known-good</html>");
+    const generated = join(workspaceDir, "spaces", "sp-trip", "generated");
+    writeFileSync(join(generated, ".lushu.attempt.candidate.html"), "<html>invalid</html>");
+
+    await expect(
+      validateAndPromoteSpaceArtifact({
+        runtime: {
+          system: {
+            runCommandWithTimeout: vi.fn(async () => ({
+              code: 1,
+              stdout: "FAIL: invalid candidate",
+              stderr: "",
+            })),
+          },
+        } as never,
+        workspaceDir,
+        spaceId: "sp-trip",
+        candidateFilePath: "generated/.lushu.attempt.candidate.html",
+        filePath: "generated/lushu.html",
+        artifactType: "html",
+      }),
+    ).rejects.toThrow("invalid candidate");
+
+    expect(readFileSync(join(generated, "lushu.html"), "utf8")).toBe(
+      "<html>last-known-good</html>",
+    );
+    expect(readFileSync(join(generated, ".lushu.attempt.candidate.html"), "utf8")).toBe(
+      "<html>invalid</html>",
+    );
   });
 
   it("accepts a path-safe Unicode Space id", async () => {

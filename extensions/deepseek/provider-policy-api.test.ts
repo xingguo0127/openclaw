@@ -16,7 +16,7 @@ describe("deepseek provider-policy-api", () => {
     expect(
       resolveThinkingProfile({
         provider: "deepseek",
-        modelId: "deepseek-v4-flash",
+        modelId: "deepseek-flash",
       })?.defaultLevel,
     ).toBe("high");
     expect(
@@ -39,10 +39,10 @@ describe("deepseek provider-policy-api", () => {
       api: "openai-completions",
       models: [
         {
-          id: "deepseek-v4-flash",
-          name: "DeepSeek V4 Flash",
+          id: "deepseek-flash",
+          name: "DeepSeek-V4.1-Flash",
           reasoning: true,
-          input: ["text"],
+          input: ["text", "image"],
         } as never,
       ],
     };
@@ -54,9 +54,9 @@ describe("deepseek provider-policy-api", () => {
     expect(model.contextWindow).toBe(1_000_000);
     expect(model.maxTokens).toBe(384_000);
     expect(model.cost).toEqual({
-      input: 0.14,
-      output: 0.28,
-      cacheRead: 0.028,
+      input: 0.3,
+      output: 1.2,
+      cacheRead: 0.006,
       cacheWrite: 0,
     });
   });
@@ -112,8 +112,8 @@ describe("deepseek provider-policy-api", () => {
       api: "openai-completions",
       models: [
         {
-          id: "deepseek-v4-flash",
-          name: "DeepSeek V4 Flash",
+          id: "deepseek-flash",
+          name: "DeepSeek-V4.1-Flash",
           reasoning: true,
           input: ["text"],
           contextWindow: 500_000,
@@ -126,9 +126,9 @@ describe("deepseek provider-policy-api", () => {
     expect(model.contextWindow).toBe(500_000);
     // cost should still be hydrated since it was missing
     expect(model.cost).toEqual({
-      input: 0.14,
-      output: 0.28,
-      cacheRead: 0.028,
+      input: 0.3,
+      output: 1.2,
+      cacheRead: 0.006,
       cacheWrite: 0,
     });
   });
@@ -140,8 +140,8 @@ describe("deepseek provider-policy-api", () => {
       api: "openai-completions",
       models: [
         {
-          id: "deepseek-v4-flash",
-          name: "DeepSeek V4 Flash",
+          id: "deepseek-flash",
+          name: "DeepSeek-V4.1-Flash",
           reasoning: true,
           input: ["text"],
           cost: userCost,
@@ -162,8 +162,8 @@ describe("deepseek provider-policy-api", () => {
       api: "openai-completions",
       models: [
         {
-          id: "deepseek-v4-flash",
-          name: "DeepSeek V4 Flash",
+          id: "deepseek-flash",
+          name: "DeepSeek-V4.1-Flash",
           reasoning: true,
           input: ["text"],
           maxTokens: 100_000,
@@ -182,13 +182,13 @@ describe("deepseek provider-policy-api", () => {
       api: "openai-completions",
       models: [
         {
-          id: "deepseek-v4-flash",
-          name: "DeepSeek V4 Flash",
+          id: "deepseek-flash",
+          name: "DeepSeek-V4.1-Flash",
           reasoning: true,
           input: ["text"],
           contextWindow: 1_000_000,
           maxTokens: 384_000,
-          cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
+          cost: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
         } as never,
       ],
     };
@@ -232,13 +232,13 @@ describe("deepseek provider-policy-api", () => {
       api: "openai-completions",
       models: [
         {
-          id: "deepseek-v4-flash",
-          name: "DeepSeek V4 Flash",
+          id: "deepseek-flash",
+          name: "DeepSeek-V4.1-Flash",
           reasoning: true,
           input: ["text"],
           contextWindow: 1_000_000,
           maxTokens: 384_000,
-          cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
+          cost: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
         } as never,
         {
           id: "deepseek-v4-pro",
