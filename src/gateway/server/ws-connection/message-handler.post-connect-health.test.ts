@@ -811,4 +811,39 @@ describe("resolvePinnedClientMetadata", () => {
       pinnedDeviceFamily: "Linux",
     });
   });
+
+  it.each([
+    ["cli", "probe"],
+    ["probe", "cli"],
+    ["probe", "probe"],
+  ])(
+    "allows CLI client reconnecting as clientMode=%s against a clientMode=%s pin without metadata-upgrade approval",
+    (claimedClientMode, pairedClientMode) => {
+      expect(
+        testing.resolvePinnedClientMetadata({
+          clientId: "cli",
+          clientMode: claimedClientMode,
+          pairedClientId: "cli",
+          pairedClientMode,
+        }),
+      ).toMatchObject({
+        clientIdMismatch: false,
+        clientModeMismatch: false,
+      });
+    },
+  );
+
+  it("still requires approval when a non-CLI client's mode changes", () => {
+    expect(
+      testing.resolvePinnedClientMetadata({
+        clientId: "node-host",
+        clientMode: "node",
+        pairedClientId: "node-host",
+        pairedClientMode: "probe",
+      }),
+    ).toMatchObject({
+      clientIdMismatch: false,
+      clientModeMismatch: true,
+    });
+  });
 });

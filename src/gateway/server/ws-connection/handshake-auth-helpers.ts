@@ -126,9 +126,15 @@ function isCliContainerLocalEquivalent(params: {
   sharedAuthOk: boolean;
   authMethod: GatewayAuthResult["method"];
 }): boolean {
+  // Read-only `openclaw gateway status`/`devices list` probes reconnect as the
+  // same CLI client id but mode=PROBE (explicitly READ_SCOPE-only, see probe.ts).
+  // Without this, every probe after a paired-as-CLI reconnect trips
+  // metadata-upgrade's strict clientMode pin and can never self-approve: the
+  // approval RPC itself requires operator.admin, which a probe never holds.
   const isCliClient =
     params.connectParams.client.id === GATEWAY_CLIENT_IDS.CLI &&
-    params.connectParams.client.mode === GATEWAY_CLIENT_MODES.CLI;
+    (params.connectParams.client.mode === GATEWAY_CLIENT_MODES.CLI ||
+      params.connectParams.client.mode === GATEWAY_CLIENT_MODES.PROBE);
   const usesSharedSecretAuth = params.authMethod === "token" || params.authMethod === "password";
   return (
     isCliClient &&

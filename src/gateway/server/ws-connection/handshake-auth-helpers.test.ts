@@ -59,6 +59,13 @@ const CLI_CONNECT_PARAMS = {
   },
 } as ConnectParams;
 
+const CLI_PROBE_CONNECT_PARAMS = {
+  client: {
+    id: GATEWAY_CLIENT_IDS.CLI,
+    mode: GATEWAY_CLIENT_MODES.PROBE,
+  },
+} as ConnectParams;
+
 function createRateLimiter(): AuthRateLimiter {
   return {
     check: () => ({ allowed: true, remaining: 1, retryAfterMs: 0 }),
@@ -359,6 +366,12 @@ describe("handshake auth helpers", () => {
         authMethod: "device-token",
       }),
     ).toBe("remote");
+  });
+
+  it("classifies CLI probe (openclaw gateway status / devices list) loopback connects as cli_container_local too", () => {
+    expect(resolveLoopbackLocality(CLI_PROBE_CONNECT_PARAMS, {}, "172.17.0.2:18789")).toBe(
+      "cli_container_local",
+    );
   });
 
   it("classifies non-CLI Docker-published loopback clients as shared_secret_loopback_local when auth is token/password", () => {

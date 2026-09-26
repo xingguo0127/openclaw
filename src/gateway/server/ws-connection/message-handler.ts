@@ -427,7 +427,22 @@ function resolvePinnedClientMetadata(params: {
   const hasPinnedPlatform = pairedPlatform !== "";
   const hasPinnedDeviceFamily = pairedDeviceFamily !== "";
   const clientIdMismatch = claimedClientId !== pairedClientId;
-  const clientModeMismatch = claimedClientMode !== pairedClientMode;
+  // The CLI's own `openclaw gateway status`/`devices list` probes reconnect
+  // with clientMode=PROBE (explicitly READ_SCOPE-only, see probe.ts) against
+  // a device paired under clientMode=CLI from a real session. Without this,
+  // every such probe trips the approval-bound identity mismatch below and
+  // forces an interactive metadata-upgrade re-approval that the probe path
+  // can never complete on its own (approving requires operator.admin, which
+  // a read-only probe never holds) — a permanent lockout after any restart.
+  const cliClientIdNormalized = normalizeDeviceMetadataForAuth(GATEWAY_CLIENT_IDS.CLI);
+  const cliModeNormalized = normalizeDeviceMetadataForAuth(GATEWAY_CLIENT_MODES.CLI);
+  const probeModeNormalized = normalizeDeviceMetadataForAuth(GATEWAY_CLIENT_MODES.PROBE);
+  const isCliProbeModeRefresh =
+    claimedClientId === cliClientIdNormalized &&
+    pairedClientId === cliClientIdNormalized &&
+    (claimedClientMode === cliModeNormalized || claimedClientMode === probeModeNormalized) &&
+    (pairedClientMode === cliModeNormalized || pairedClientMode === probeModeNormalized);
+  const clientModeMismatch = claimedClientMode !== pairedClientMode && !isCliProbeModeRefresh;
   const modelIdentifierMismatch = claimedModelIdentifier !== pairedModelIdentifier;
   const isLegacyNodeHostPlatformPin =
     params.clientId === GATEWAY_CLIENT_IDS.NODE_HOST &&
