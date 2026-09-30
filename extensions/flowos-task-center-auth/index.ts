@@ -23,6 +23,15 @@ type DeviceEventBinding = {
 };
 
 const pluginId = "flowos-task-center-auth";
+// AgentTerminal's Assist proxy uses the same operator permissions as FloAI.
+// In particular admin carries the verified owner context used by domain tools.
+const terminalOperatorScopes = [
+  "operator.read",
+  "operator.write",
+  "operator.pairing",
+  "operator.talk.secrets",
+  "operator.admin",
+];
 const genericDeviceEventAudience = "assist:device-events";
 const legacyHealthDeviceEventAudience = "assist:health-device-ingest";
 const defaultDeviceEventIssuer = "flowos-device-identity";
@@ -592,6 +601,7 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
       const deviceId = normalizedString(input.deviceId);
       const publicKey = normalizedString(input.devicePublicKey);
       const terminal = input.deviceType === "AgentTerminal";
+      const scopes = terminal ? terminalOperatorScopes : ["operator.read", "operator.write"];
       const profile = terminal
         ? {
             displayName: "FlowOS Agent Terminal",
@@ -661,14 +671,18 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
             const token = await ensureDeviceToken({
               deviceId,
               role: "operator",
-              scopes: ["operator.read", "operator.write"],
+              scopes,
             });
-            if (!token) {
+            if (token) {
+              respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
+              return;
+            }
+            if (!terminal) {
               reject(respond, "device token is unavailable");
               return;
             }
-            respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
-            return;
+            // Older terminal approvals only covered read/write. Re-provision
+            // through the authenticated owner's approval, then issue its token.
           }
         }
         const requested = await requestDevicePairing({
@@ -677,7 +691,7 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
           ...profile,
           clientMode: "ui",
           role: "operator",
-          scopes: ["operator.read", "operator.write"],
+          scopes,
           silent: false,
         });
         const approved = await approveDevicePairing(requested.request.requestId, {
@@ -690,7 +704,7 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
         const token = await ensureDeviceToken({
           deviceId,
           role: "operator",
-          scopes: ["operator.read", "operator.write"],
+          scopes,
         });
         if (!token) {
           reject(respond, "device token is unavailable");
