@@ -29,8 +29,6 @@ import { resolveSessionStoreEntry } from "../../config/sessions/store.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import { resolveSilentReplySettings } from "../../config/silent-reply.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { buildAmbientContextPrompt } from "../../gateway/ambient-state.js";
-import { buildCollabContextPrompt } from "../../gateway/collab-state.js";
 import { logVerbose } from "../../globals.js";
 import { measureDiagnosticsTimelineSpan } from "../../infra/diagnostics-timeline.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
@@ -622,21 +620,12 @@ export async function runPreparedReply(
     isNewSession ? sessionCtx : { ...sessionCtx, ThreadStarterBody: undefined },
     { includeFormattingHints: !useFastReplyRuntime },
   );
-  // FlowOS 分屏协作态:若当前会话处于分屏,注入一行"左侧是谁/能否读"的元信息(持续感知)。
-  // 仅进 per-message 片段,不进 static(下方),避免污染 CLI 复用哈希的静态 prefix 缓存。
-  const collabContext = buildCollabContextPrompt(sessionKey);
-  // FlowOS 半模态面板:若本会话是从某个 app 前台唤起的,注入一行"用户在哪个 app / 什么页面"。
-  // 与 collabContext 并列(两种屏幕上下文,见 ambient-state 头注释);同样只进 per-message 片段,
-  // 不进下方 static —— 避免污染 CLI 复用哈希的静态 prefix 缓存。
-  const ambientContext = buildAmbientContextPrompt(sessionKey);
   const extraSystemPromptParts = [
     inboundMetaPrompt,
     directChatContext,
     groupChatContext,
     groupIntro,
     groupSystemPrompt,
-    collabContext,
-    ambientContext,
     buildExecOverridePromptHint({
       execOverrides,
       elevatedLevel: resolvedElevatedLevel,
