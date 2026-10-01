@@ -341,7 +341,6 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
     methods: [
       "doctor.memory.status",
       "doctor.memory.dreamDiary",
-      "doctor.memory.knowledgeGraph",
       "doctor.memory.backfillDreamDiary",
       "doctor.memory.resetDreamDiary",
       "doctor.memory.resetGroundedShortTerm",
