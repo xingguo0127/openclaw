@@ -909,6 +909,7 @@ export function createPluginRuntimeMock(overrides: PluginRuntimeMockOverrides = 
       complete: vi.fn(),
       run: vi.fn(),
       waitForRun: vi.fn(),
+      getRunStatus: vi.fn(),
       getSessionMessages: vi.fn(),
       deleteSession: vi.fn(),
     },

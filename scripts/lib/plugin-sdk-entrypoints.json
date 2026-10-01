@@ -1,4 +1,5 @@
 [
+  "celia-card-inject",
   "core",
   "code-mode-executor-runtime",
   "control-ui-link-reader",

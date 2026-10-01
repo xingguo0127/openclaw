@@ -1,0 +1,21 @@
+{
+  "id": "flowos-capabilities",
+  "name": "FlowOS Capabilities",
+  "description": "Discover shared platform and connected-account capabilities and invoke supported reads.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "activation": {
+    "onStartup": false,
+    "onConfigPaths": [
+      "plugins.entries.flowos-capabilities"
+    ]
+  },
+  "contracts": {
+    "tools": [
+      "flowos_capability"
+    ]
+  }
+}

@@ -873,6 +873,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/celia-canvas:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   extensions/cerebras:
     devDependencies:
       '@openclaw/plugin-sdk':
@@ -1262,6 +1268,50 @@ importers:
         version: link:../../packages/plugin-sdk
 
   extensions/fish-audio-speech:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/flowos-capabilities:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/flowos-execution-runtime:
+    dependencies:
+      typebox:
+        specifier: 1.3.34
+        version: 1.3.34
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/flowos-memory-graph:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/flowos-screen-context:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/flowos-surface-context:
+    dependencies:
+      typebox:
+        specifier: 1.3.34
+        version: 1.3.34
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/flowos-task-center-auth:
     devDependencies:
       '@openclaw/plugin-sdk':
         specifier: workspace:*
@@ -2048,6 +2098,12 @@ importers:
         version: link:../../packages/plugin-sdk
 
   extensions/qwen:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/qwen-audio-tts:
     devDependencies:
       '@openclaw/plugin-sdk':
         specifier: workspace:*

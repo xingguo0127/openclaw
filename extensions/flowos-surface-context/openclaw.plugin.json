@@ -1,0 +1,15 @@
+{
+  "id": "flowos-surface-context",
+  "activation": {
+    "onStartup": false,
+    "onConfigPaths": ["plugins.entries.flowos-surface-context"]
+  },
+  "contracts": {
+    "tools": ["surface_context_resolve"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

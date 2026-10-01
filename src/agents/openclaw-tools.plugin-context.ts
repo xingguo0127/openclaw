@@ -20,6 +20,8 @@ export type OpenClawPluginToolOptions = {
   agentSessionKey?: string;
   runSessionKey?: string;
   runId?: string;
+  /** Runtime-owned source that initiated the current run. */
+  trigger?: string;
   /** Host-bound standalone request/grant authority, never supplied by tool arguments. */
   assertInvocationCurrent?: () => void;
   assertInputCommitAllowed?: () => void;
@@ -109,6 +111,8 @@ export function resolveOpenClawPluginToolInputs(params: {
       agentId: sessionAgentId,
       sessionKey,
       sessionId: options?.sessionId,
+      runId: options?.runId,
+      trigger: options?.trigger,
       toolBindings: options?.toolBindings,
       activeProjectKeys: options?.activeProjectKeys,
       conversationRecall: options?.conversationRecall,

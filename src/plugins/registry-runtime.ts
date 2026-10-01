@@ -648,6 +648,7 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
             });
           },
           waitForRun: (params) => runWithPluginScope(() => subagent.waitForRun(params)),
+          getRunStatus: (params) => runWithPluginScope(() => subagent.getRunStatus(params)),
           getSessionMessages: (params) =>
             runWithPluginScope(() => subagent.getSessionMessages(params)),
           deleteSession: async (params) => {

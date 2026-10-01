@@ -39,6 +39,8 @@ export type OpenClawSharedToolsOptions = {
   /** One-shot local CLI runs release plugin-owned resources after their result. */
   oneShotCliRun?: boolean;
   runId?: string;
+  /** Runtime-owned source that initiated the current run. */
+  trigger?: string;
   computerTransport?: import("./tools/computer-tool.js").ComputerToolTransport | null;
   /** Current runtime directory used as the default project for follow-up suggestions. */
   cwd?: string;

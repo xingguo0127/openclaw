@@ -449,6 +449,10 @@
   "main": "dist/index.js",
   "exports": {
     ".": "./dist/index.js",
+    "./plugin-sdk/celia-card-inject": {
+      "types": "./dist/plugin-sdk/celia-card-inject.d.ts",
+      "default": "./dist/plugin-sdk/celia-card-inject.js"
+    },
     "./plugin-sdk/core": {
       "types": "./dist/plugin-sdk/core.d.ts",
       "default": "./dist/plugin-sdk/core.js"

@@ -2,7 +2,12 @@
 import { createLazyRuntimeMethod } from "../shared/lazy-runtime.js";
 
 export { approveDevicePairing } from "../infra/device-pairing-approval.js";
-export { listDevicePairing } from "../infra/device-pairing.js";
+export { ensureDeviceToken } from "../infra/device-pairing-tokens.js";
+export {
+  getPairedDevice,
+  listDevicePairing,
+  requestDevicePairing,
+} from "../infra/device-pairing.js";
 export {
   clearDeviceBootstrapTokens,
   issueDeviceBootstrapToken,

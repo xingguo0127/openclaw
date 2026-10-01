@@ -1,0 +1,9 @@
+{
+  "name": "@openclaw/flowos-task-center-auth",
+  "version": "2026.8.11",
+  "private": true,
+  "description": "Issue audience-bound short-lived FlowOS user and device JWTs",
+  "type": "module",
+  "devDependencies": { "@openclaw/plugin-sdk": "workspace:*" },
+  "openclaw": { "extensions": ["./index.ts"] }
+}

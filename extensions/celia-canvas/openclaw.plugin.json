@@ -1,0 +1,13 @@
+{
+  "id": "celia-canvas",
+  "name": "Celia Canvas",
+  "description": "Structured card push tool (push_card) with transcript persistence. Replaces the celia_card bash patch.",
+  "contracts": {
+    "tools": ["push_card"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

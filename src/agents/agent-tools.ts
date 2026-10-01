@@ -423,6 +423,7 @@ export function createOpenClawCodingToolsInternal(
     agentSessionKey: options?.sessionKey,
     runSessionKey: options?.runSessionKey,
     runId: options?.runId,
+    trigger: options?.trigger,
     agentChannel: resolveGatewayMessageChannel(options?.messageChannel ?? options?.messageProvider),
     agentAccountId: options?.agentAccountId,
     agentTo: options?.messageTo,

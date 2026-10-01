@@ -1,0 +1,20 @@
+{
+  "id": "flowos-task-center-auth",
+  "activation": {
+    "onStartup": false,
+    "onConfigPaths": ["plugins.entries.flowos-task-center-auth"]
+  },
+  "contracts": {
+    "gatewayMethodDispatch": ["authenticated-request"],
+    "tools": ["proactive_concern", "resolve_secretary_observation"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["userId", "tenantId"],
+    "properties": {
+      "userId": { "type": "string", "minLength": 1 },
+      "tenantId": { "type": "string", "minLength": 1 }
+    }
+  }
+}

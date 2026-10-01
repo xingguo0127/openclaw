@@ -34,7 +34,19 @@ type SubagentRunParams = {
   completionDelivery?: "current-requester";
   idempotencyKey?: string;
   cwd?: string;
+  /** Hard deadline for this plugin-owned run. Zero keeps the configured no-timeout behavior. */
+  runTimeoutSeconds?: number;
 };
+
+export type SubagentRunStatusParams = {
+  runId: string;
+  sessionKey: string;
+};
+
+export type SubagentRunStatusResult =
+  | { status: "missing" }
+  | { status: "running" }
+  | { status: "ended"; outcome: "ok" | "error" | "timeout" };
 
 type SubagentCompleteParams = {
   agentId: string;
@@ -149,6 +161,7 @@ export type PluginRuntime = PluginRuntimeCore & {
     complete: (params: SubagentCompleteParams) => Promise<{ text: string }>;
     run: (params: SubagentRunParams) => Promise<SubagentRunResult>;
     waitForRun: (params: SubagentWaitParams) => Promise<AgentWaitResult>;
+    getRunStatus: (params: SubagentRunStatusParams) => Promise<SubagentRunStatusResult>;
     getSessionMessages: (
       params: SubagentGetSessionMessagesParams,
     ) => Promise<SubagentGetSessionMessagesResult>;

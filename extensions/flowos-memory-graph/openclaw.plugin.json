@@ -1,0 +1,12 @@
+{
+  "id": "flowos-memory-graph",
+  "activation": {
+    "onStartup": false,
+    "onConfigPaths": ["plugins.entries.flowos-memory-graph"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

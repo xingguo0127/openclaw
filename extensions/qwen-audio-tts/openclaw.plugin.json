@@ -1,0 +1,23 @@
+{
+  "id": "qwen-audio-tts",
+  "activation": {
+    "onStartup": false
+  },
+  "enabledByDefault": true,
+  "setup": {
+    "providers": [
+      {
+        "id": "qwen-audio-tts",
+        "envVars": ["DASHSCOPE_API_KEY"]
+      }
+    ]
+  },
+  "contracts": {
+    "speechProviders": ["qwen-audio-tts"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

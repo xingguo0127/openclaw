@@ -5,6 +5,7 @@ import { assertOperatorModelAllowed } from "../agents/admitted-run-context.js";
 import { splitTrailingAuthProfile } from "../agents/model-ref-profile.js";
 import type { ModelRef } from "../agents/model-ref-shared.js";
 import type { AgentWaitResult } from "../agents/run-wait.types.js";
+import { getSubagentRunByChildSessionKey } from "../agents/subagents/registry/subagent-registry-read.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizePluginsConfig } from "../plugins/config-state.js";
 import { compileModelAllowlist, type CompiledModelAllowlist } from "../plugins/model-allowlist.js";
@@ -427,6 +428,10 @@ export function createGatewaySubagentRuntime(
           ...(params.lane && { lane: params.lane }),
           ...(params.cwd && { cwd: params.cwd }),
           ...(params.lightContext === true && { bootstrapContextMode: "lightweight" }),
+          ...(typeof params.runTimeoutSeconds === "number" &&
+            Number.isFinite(params.runTimeoutSeconds) && {
+              timeout: Math.max(0, Math.floor(params.runTimeoutSeconds)),
+            }),
           // The Gateway agent schema requires a nonempty idempotency key.
           idempotencyKey: params.idempotencyKey || randomUUID(),
         },
@@ -475,6 +480,20 @@ export function createGatewaySubagentRuntime(
         ...metadata,
         status,
         ...(status !== "ok" && error ? { error } : {}),
+      };
+    },
+    async getRunStatus(params) {
+      const entry = getSubagentRunByChildSessionKey(params.sessionKey);
+      if (!entry || entry.runId !== params.runId) {
+        return { status: "missing" };
+      }
+      if (entry.execution.status !== "terminal") {
+        return { status: "running" };
+      }
+      const outcome = entry.execution.outcome?.status;
+      return {
+        status: "ended",
+        outcome: outcome === "ok" || outcome === "timeout" ? outcome : "error",
       };
     },
     getSessionMessages,
