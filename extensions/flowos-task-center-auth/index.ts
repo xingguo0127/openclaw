@@ -30,6 +30,11 @@ const genericDeviceEventScope = "device.event.write";
 const legacyHealthDeviceEventScope = "health.device-event.write";
 const tokenLifetimeSeconds = 300;
 const bindingsNamespace = "device-event-bindings";
+const onboardingIdentitiesNamespace = "device-onboarding-identities";
+
+// Upstream PairedDevice does not store the hardware model, so onboarding keeps its own record of
+// which modelIdentifier it provisioned for each device (re-onboarding must match it).
+type OnboardingIdentity = { modelIdentifier: string; updatedAt: string };
 const knownCredentialNames = [
   "OPENCLAW_GATEWAY_TOKEN",
   "FLOWOS_TASK_CENTER_JWT_SECRET",
@@ -584,7 +589,10 @@ function registerUserTokenMethod(
   );
 }
 
-function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
+function registerDeviceOnboardingProvisionMethod(
+  api: OpenClawPluginApi,
+  identities: PluginStateKeyedStore<OnboardingIdentity>,
+): void {
   api.registerGatewayMethod(
     "flowos.deviceOnboardingProvision",
     async ({ params, client, respond }: GatewayRequestHandlerOptions) => {
@@ -638,10 +646,9 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
       }
       try {
         const existing = await getPairedDevice(deviceId);
-        // TODO(sync): upstream PairedDevice no longer stores modelIdentifier; FlowGo identity pinning is
-        // still a core patch (report-flowgo cluster 2). Until it is re-applied this stays undefined.
-        const existingModelIdentifier = (existing as { modelIdentifier?: string } | null)
-          ?.modelIdentifier;
+        const existingModelIdentifier =
+          (await identities.lookup(deviceId))?.modelIdentifier ??
+          (existing as { modelIdentifier?: string } | null)?.modelIdentifier;
         if (existing) {
           const samePublicKey = existing.publicKey === publicKey;
           const isCurrentFlowGoIdentity =
@@ -649,7 +656,10 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
             existing.clientMode === "ui" &&
             existing.platform === profile.platform &&
             existing.deviceFamily === profile.deviceFamily &&
-            existingModelIdentifier === profile.modelIdentifier;
+            // Devices provisioned before the model was recorded here (or by the old core field) keep
+            // working: an ESP32 terminal is already uniquely identified by platform/family/key.
+            (existingModelIdentifier === profile.modelIdentifier ||
+              (terminal && existingModelIdentifier === undefined));
           const isLegacyFlowGoIdentity =
             !terminal &&
             existing.clientId === "gateway-client" &&
@@ -700,6 +710,10 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
           reject(respond, "device token is unavailable");
           return;
         }
+        await identities.register(deviceId, {
+          modelIdentifier: profile.modelIdentifier,
+          updatedAt: new Date().toISOString(),
+        });
         respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
       } catch {
         respond(false, undefined, { code: "UNAVAILABLE", message: "device provisioning failed" });
@@ -850,7 +864,13 @@ export default definePluginEntry({
       "operator.admin",
       true,
     );
-    registerDeviceOnboardingProvisionMethod(api);
+    registerDeviceOnboardingProvisionMethod(
+      api,
+      api.runtime.state.openKeyedStore<OnboardingIdentity>({
+        namespace: onboardingIdentitiesNamespace,
+        maxEntries: 1024,
+      }),
+    );
     // 主动服务(委托 / 事件入口 / 收件箱 / 入口审计)的用户主体票。
     // ★ 单独一个 audience,不复用 assist:task-center —— 凭据要按用途分域:
     //   一张任务中心的票不该顺带能拉走「这个人在关注什么、用哪些 App、什么时候在用」。
