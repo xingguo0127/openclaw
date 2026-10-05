@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks";
 import { resolve } from "node:path";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import {
@@ -13,6 +14,20 @@ import type { SpaceArtifactValidation } from "./validation.js";
 const activeStatuses = new Set(["QUEUED", "PLANNING", "RUNNING", "AWAITING_USER", "PAUSED"]);
 // Agent lifecycle hooks can fire before automatic retries, so durable bindings
 // use bounded timers instead of treating an intermediate agent_end as terminal.
+// Upstream binds the operator authority of a tool call / hook run to its async context and revokes it
+// when that run ends. Guards, retries and finalization are background work that must outlive the run
+// that scheduled them, so they run in the context captured at plugin registration (no run authority).
+let detachedRunner: <T>(run: () => T) => T = (run) => run();
+
+/** Capture the current (registration-time, run-free) async context for later background work. */
+export function bindDetachedRunner(): void {
+  detachedRunner = AsyncResource.bind(<T>(run: () => T): T => run());
+}
+
+function runDetached<T>(run: () => T): T {
+  return detachedRunner(run);
+}
+
 const spawnGuardMs = 60_000;
 const closureGuardMs = 60_000;
 const maxClosureWakeRetries = 2;
@@ -107,7 +122,11 @@ export class FlowosExecutionRuntime {
     private readonly discardPlannedArtifact?: PlannedArtifactDiscarder,
   ) {}
 
-  async subagentEnded(event: EndedEvent, ctx: SubagentContext): Promise<void> {
+  subagentEnded(event: EndedEvent, ctx: SubagentContext): Promise<void> {
+    return runDetached(() => this.subagentEndedDetached(event, ctx));
+  }
+
+  private async subagentEndedDetached(event: EndedEvent, ctx: SubagentContext): Promise<void> {
     if (event.targetKind !== "subagent") {
       return;
     }
@@ -275,7 +294,11 @@ export class FlowosExecutionRuntime {
     }
   }
 
-  async reconcile(): Promise<void> {
+  reconcile(): Promise<void> {
+    return runDetached(() => this.reconcileDetached());
+  }
+
+  private async reconcileDetached(): Promise<void> {
     for (const binding of await this.bindings.canonicalEntries()) {
       if (binding.status === "CREATED" || binding.status === "STARTING") {
         // Registry restoration and plugin gateway_start can race. The bounded
@@ -904,7 +927,7 @@ export class FlowosExecutionRuntime {
     }
     const timer = setTimeout(() => {
       guards.delete(key);
-      void task().catch((error: unknown) => {
+      void runDetached(task).catch((error: unknown) => {
         this.logger.warn(
           `FlowOS Execution guard failed for ${key}: ${error instanceof Error ? error.message : "error"}`,
         );
