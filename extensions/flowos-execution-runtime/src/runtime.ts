@@ -16,16 +16,17 @@ const activeStatuses = new Set(["QUEUED", "PLANNING", "RUNNING", "AWAITING_USER"
 // use bounded timers instead of treating an intermediate agent_end as terminal.
 // Upstream binds the operator authority of a tool call / hook run to its async context and revokes it
 // when that run ends. Guards, retries and finalization are background work that must outlive the run
-// that scheduled them, so they run in the context captured at plugin registration (no run authority).
-let detachedRunner: <T>(run: () => T) => T = (run) => run();
-
-/** Capture the current (registration-time, run-free) async context for later background work. */
-export function bindDetachedRunner(): void {
-  detachedRunner = AsyncResource.bind(<T>(run: () => T): T => run());
-}
+// that scheduled them, so they run on the process-wide context-free async root that the Gateway creates
+// before any managed work starts (the same root its own detached work uses). Capturing the context at
+// plugin registration is not safe: plugins can be (re)registered while a run is active.
+const detachedAsyncRootKey = Symbol.for("openclaw.detachedAsyncContext");
 
 function runDetached<T>(run: () => T): T {
-  return detachedRunner(run);
+  const root = (globalThis as Record<PropertyKey, unknown>)[detachedAsyncRootKey];
+  if (root instanceof AsyncResource) {
+    return root.runInAsyncScope(run);
+  }
+  return run();
 }
 
 const spawnGuardMs = 60_000;

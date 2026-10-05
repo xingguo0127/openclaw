@@ -15,7 +15,7 @@ import {
   ImageGenerationRunStore,
 } from "./src/image-generation.js";
 import { getExecutionLocks } from "./src/locks.js";
-import { bindDetachedRunner, FlowosExecutionRuntime } from "./src/runtime.js";
+import { FlowosExecutionRuntime } from "./src/runtime.js";
 import { createSpaceMaterialTools } from "./src/space-materials.js";
 import { createFlowosExecutionTools } from "./src/tools.js";
 import {
@@ -129,8 +129,6 @@ export default definePluginEntry({
   name: "FlowOS Execution Runtime",
   description: "Bind trusted FlowOS execution and paid capability tools to OpenClaw runs",
   register(api) {
-    // Registration runs outside any agent run: capture that clean async context for background work.
-    bindDetachedRunner();
     const endpoint = resolveTrustedAssistEndpoint(process.env.ASSIST_API_BASE);
     const token = deriveExecutionRuntimeToken();
     const imageToken = deriveImageGenerationRuntimeToken();
