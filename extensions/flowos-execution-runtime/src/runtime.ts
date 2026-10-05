@@ -669,6 +669,9 @@ export class FlowosExecutionRuntime {
       ...plan.artifactCandidateFilePath.split("/"),
     );
     const reason = error instanceof Error ? error.message : "validator rejected the candidate";
+    this.logger.warn(
+      `FlowOS Execution planned validation rejected ${binding.executionId} (repair ${nextRepairCount}/${maxValidationRepairRetries}): ${reason.slice(0, 600)}`,
+    );
     const run = await this.subagent.run({
       sessionKey: childSessionKey,
       message:

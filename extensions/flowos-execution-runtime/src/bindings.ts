@@ -93,7 +93,8 @@ export class RunBindingStore {
   async save(binding: RunBinding): Promise<void> {
     await this.store.register(
       this.executionKey(binding.executionId, binding.attemptId),
-      binding,
+      // Plugin state now rejects values that are not JSON-serializable (e.g. `outcome: undefined`).
+      JSON.parse(JSON.stringify(binding)) as RunBinding,
       isExpirableBinding(binding) ? { ttlMs: terminalBindingTtlMs } : undefined,
     );
   }
