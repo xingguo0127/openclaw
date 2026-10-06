@@ -52,6 +52,7 @@ describe("FlowOS device onboarding provisioning", () => {
       params: {
         deviceId,
         devicePublicKey: publicKeyText,
+        deviceType: "AgentTerminal",
       },
       client: {
         isDeviceTokenAuth: true,
@@ -72,11 +73,11 @@ describe("FlowOS device onboarding provisioning", () => {
     expect(result.deviceId).toBe(deviceId);
     await expect(getPairedDevice(deviceId)).resolves.toMatchObject({
       publicKey: publicKeyText,
-      platform: "linux",
-      deviceFamily: "RaspberryPi",
-      clientId: "openclaw-pet",
+      platform: "esp32",
+      deviceFamily: "ESP32",
+      clientId: "gateway-client",
       clientMode: "ui",
-      modelIdentifier: "FlowGo",
+      modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
       role: "operator",
       scopes: ["operator.read", "operator.write"],
     });

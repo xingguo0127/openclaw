@@ -589,6 +589,57 @@ function registerUserTokenMethod(
   );
 }
 
+const TERMINAL_SCOPES = ["operator.read", "operator.write"];
+// Mac 客户端和手机一样是 owner 级操作端（设备管理、改 Agent 等），请求的就是这四个 scope。
+const MAC_CLIENT_SCOPES = ["operator.read", "operator.write", "operator.admin", "operator.pairing"];
+const MAC_PLATFORM_PATTERN = /^macOS \d{1,3}\.\d{1,3}(\.\d{1,3})?$/;
+
+type OnboardingProfile = {
+  displayName: string;
+  platform: string;
+  deviceFamily: string;
+  clientId: string;
+  modelIdentifier?: string;
+};
+
+// 入网档案必须和设备之后真实握手时上报的客户端元数据一致，否则会被当成 metadata 升级要求再次批准。
+function resolveOnboardingProfile(
+  input: Record<string, unknown>,
+): { profile: OnboardingProfile; scopes: string[]; keys: string[]; terminal: boolean } | null {
+  if (input.deviceType === "AgentTerminal") {
+    return {
+      profile: {
+        displayName: "FlowOS Agent Terminal",
+        platform: "esp32",
+        deviceFamily: "ESP32",
+        clientId: "gateway-client",
+        modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
+      },
+      scopes: TERMINAL_SCOPES,
+      keys: ["deviceId", "devicePublicKey", "deviceType"],
+      terminal: true,
+    };
+  }
+  if (input.deviceType === "MacClient") {
+    const platform = normalizedString(input.platform);
+    if (!MAC_PLATFORM_PATTERN.test(platform)) {
+      return null;
+    }
+    return {
+      profile: {
+        displayName: "FlowOS Mac",
+        platform,
+        deviceFamily: "Mac",
+        clientId: "openclaw-macos",
+      },
+      scopes: MAC_CLIENT_SCOPES,
+      keys: ["deviceId", "devicePublicKey", "deviceType", "platform"],
+      terminal: false,
+    };
+  }
+  return null;
+}
+
 function registerDeviceOnboardingProvisionMethod(
   api: OpenClawPluginApi,
   identities: PluginStateKeyedStore<OnboardingIdentity>,
@@ -599,22 +650,7 @@ function registerDeviceOnboardingProvisionMethod(
       const input = params ?? {};
       const deviceId = normalizedString(input.deviceId);
       const publicKey = normalizedString(input.devicePublicKey);
-      const terminal = input.deviceType === "AgentTerminal";
-      const profile = terminal
-        ? {
-            displayName: "FlowOS Agent Terminal",
-            platform: "esp32",
-            deviceFamily: "ESP32",
-            clientId: "gateway-client",
-            modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
-          }
-        : {
-            displayName: "FlowGo",
-            platform: "linux",
-            deviceFamily: "RaspberryPi",
-            clientId: "openclaw-pet",
-            modelIdentifier: "FlowGo",
-          };
+      const resolved = resolveOnboardingProfile(input);
       let publicKeyBytes: Buffer;
       try {
         publicKeyBytes = Buffer.from(publicKey, "base64url");
@@ -630,12 +666,8 @@ function registerDeviceOnboardingProvisionMethod(
         return;
       }
       if (
-        !hasExactKeys(
-          input,
-          terminal
-            ? ["deviceId", "devicePublicKey", "deviceType"]
-            : ["deviceId", "devicePublicKey"],
-        ) ||
+        !resolved ||
+        !hasExactKeys(input, resolved.keys) ||
         !validIdentifier(deviceId) ||
         publicKeyBytes.length !== 32 ||
         publicKeyBytes.toString("base64url") !== publicKey ||
@@ -644,14 +676,16 @@ function registerDeviceOnboardingProvisionMethod(
         reject(respond, "valid device identity is required");
         return;
       }
+      const { profile, scopes, terminal } = resolved;
       try {
         const existing = await getPairedDevice(deviceId);
         const existingModelIdentifier =
           (await identities.lookup(deviceId))?.modelIdentifier ??
-          (existing as { modelIdentifier?: string } | null)?.modelIdentifier;
+          (existing as { modelIdentifier?: string } | null)?.modelIdentifier ??
+          undefined;
         if (existing) {
           const samePublicKey = existing.publicKey === publicKey;
-          const isCurrentFlowGoIdentity =
+          const isCurrentIdentity =
             existing.clientId === profile.clientId &&
             existing.clientMode === "ui" &&
             existing.platform === profile.platform &&
@@ -660,30 +694,17 @@ function registerDeviceOnboardingProvisionMethod(
             // working: an ESP32 terminal is already uniquely identified by platform/family/key.
             (existingModelIdentifier === profile.modelIdentifier ||
               (terminal && existingModelIdentifier === undefined));
-          const isLegacyFlowGoIdentity =
-            !terminal &&
-            existing.clientId === "gateway-client" &&
-            existing.clientMode === "ui" &&
-            existing.platform === "linux" &&
-            existing.deviceFamily === "RaspberryPi" &&
-            !existingModelIdentifier;
-          if (!samePublicKey || (!isCurrentFlowGoIdentity && !isLegacyFlowGoIdentity)) {
+          if (!samePublicKey || !isCurrentIdentity) {
             reject(respond, "existing device identity does not match onboarding request");
             return;
           }
-          if (isCurrentFlowGoIdentity) {
-            const token = await ensureDeviceToken({
-              deviceId,
-              role: "operator",
-              scopes: ["operator.read", "operator.write"],
-            });
-            if (!token) {
-              reject(respond, "device token is unavailable");
-              return;
-            }
-            respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
+          const token = await ensureDeviceToken({ deviceId, role: "operator", scopes });
+          if (!token) {
+            reject(respond, "device token is unavailable");
             return;
           }
+          respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
+          return;
         }
         const requested = await requestDevicePairing({
           deviceId,
@@ -691,7 +712,7 @@ function registerDeviceOnboardingProvisionMethod(
           ...profile,
           clientMode: "ui",
           role: "operator",
-          scopes: ["operator.read", "operator.write"],
+          scopes,
           silent: false,
         });
         const approved = await approveDevicePairing(requested.request.requestId, {
@@ -701,19 +722,17 @@ function registerDeviceOnboardingProvisionMethod(
           reject(respond, "device provisioning was not approved");
           return;
         }
-        const token = await ensureDeviceToken({
-          deviceId,
-          role: "operator",
-          scopes: ["operator.read", "operator.write"],
-        });
+        const token = await ensureDeviceToken({ deviceId, role: "operator", scopes });
         if (!token) {
           reject(respond, "device token is unavailable");
           return;
         }
-        await identities.register(deviceId, {
-          modelIdentifier: profile.modelIdentifier,
-          updatedAt: new Date().toISOString(),
-        });
+        if (profile.modelIdentifier) {
+          await identities.register(deviceId, {
+            modelIdentifier: profile.modelIdentifier,
+            updatedAt: new Date().toISOString(),
+          });
+        }
         respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
       } catch {
         respond(false, undefined, { code: "UNAVAILABLE", message: "device provisioning failed" });
