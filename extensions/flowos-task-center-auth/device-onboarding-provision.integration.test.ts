@@ -79,14 +79,26 @@ describe("FlowOS device onboarding provisioning", () => {
       clientMode: "ui",
       modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
       role: "operator",
-      scopes: ["operator.read", "operator.write"],
+      scopes: [
+        "operator.read",
+        "operator.write",
+        "operator.pairing",
+        "operator.talk.secrets",
+        "operator.admin",
+      ],
     });
     await expect(
       verifyDeviceToken({
         deviceId: result.deviceId,
         token: result.deviceToken,
         role: "operator",
-        scopes: ["operator.read", "operator.write"],
+        scopes: [
+          "operator.read",
+          "operator.write",
+          "operator.pairing",
+          "operator.talk.secrets",
+          "operator.admin",
+        ],
       }),
     ).resolves.toEqual({ ok: true });
 

@@ -589,7 +589,15 @@ function registerUserTokenMethod(
   );
 }
 
-const TERMINAL_SCOPES = ["operator.read", "operator.write"];
+// AgentTerminal's Assist proxy uses the same operator permissions as FloAI. In particular admin
+// carries the verified owner context used by domain tools (see fork PR #45 / floai #395).
+const TERMINAL_SCOPES = [
+  "operator.read",
+  "operator.write",
+  "operator.pairing",
+  "operator.talk.secrets",
+  "operator.admin",
+];
 // Mac 客户端和手机一样是 owner 级操作端（设备管理、改 Agent 等），请求的就是这四个 scope。
 const MAC_CLIENT_SCOPES = ["operator.read", "operator.write", "operator.admin", "operator.pairing"];
 const MAC_PLATFORM_PATTERN = /^macOS \d{1,3}\.\d{1,3}(\.\d{1,3})?$/;
@@ -699,12 +707,16 @@ function registerDeviceOnboardingProvisionMethod(
             return;
           }
           const token = await ensureDeviceToken({ deviceId, role: "operator", scopes });
-          if (!token) {
+          if (token) {
+            respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
+            return;
+          }
+          if (!terminal) {
             reject(respond, "device token is unavailable");
             return;
           }
-          respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
-          return;
+          // Older terminal approvals only covered read/write. Re-provision
+          // through the authenticated owner's approval, then issue its token.
         }
         const requested = await requestDevicePairing({
           deviceId,

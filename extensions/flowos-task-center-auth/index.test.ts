@@ -462,7 +462,13 @@ describe("flowos task-center auth", () => {
         clientMode: "ui",
         modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
         role: "operator",
-        scopes: ["operator.read", "operator.write"],
+        scopes: [
+          "operator.read",
+          "operator.write",
+          "operator.pairing",
+          "operator.talk.secrets",
+          "operator.admin",
+        ],
       }),
     );
   });
