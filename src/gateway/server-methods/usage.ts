@@ -52,7 +52,6 @@ import type {
   SessionsUsageResult,
 } from "../../shared/usage-types.js";
 import { runTasksWithConcurrency } from "../../utils/run-with-concurrency.js";
-import { authorizeFlowGoOwnedSession, resolveFlowGoCaller } from "../flowgo-device-routing.js";
 import {
   resolveSessionStoreAgentId,
   resolveStoredSessionKeyForAgentStore,
@@ -68,23 +67,6 @@ const COST_USAGE_CACHE_TTL_MS = 30_000;
 const COST_USAGE_CACHE_MAX = 256;
 const SESSIONS_USAGE_CACHE_READ_CONCURRENCY = 12;
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-async function authorizeFlowGoUsageKey(params: {
-  client: Parameters<GatewayRequestHandlers[string]>[0]["client"];
-  key: string;
-  respond: RespondFn;
-}): Promise<boolean> {
-  const entry = loadSessionEntry(params.key).entry;
-  const access = await authorizeFlowGoOwnedSession({
-    client: params.client,
-    ownerDeviceId: entry?.flowGoOwnerDeviceId,
-  });
-  if (access.kind !== "error") {
-    return true;
-  }
-  params.respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, access.message));
-  return false;
-}
 
 type DateRange = { startMs: number; endMs: number };
 type DateInterpretation =
@@ -949,7 +931,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     });
     respond(true, summary, undefined);
   },
-  "sessions.usage": async ({ respond, params, context, client }) => {
+  "sessions.usage": async ({ respond, params, context }) => {
     if (!validateSessionsUsageParams(params)) {
       respond(
         false,
@@ -986,14 +968,6 @@ export const usageHandlers: GatewayRequestHandlers = {
     const limit = typeof p.limit === "number" && Number.isFinite(p.limit) ? p.limit : 50;
     const includeContextWeight = p.includeContextWeight ?? false;
     const specificKey = normalizeOptionalString(p.key) ?? null;
-    if (specificKey && !(await authorizeFlowGoUsageKey({ client, key: specificKey, respond }))) {
-      return;
-    }
-    const flowGoCaller = await resolveFlowGoCaller(client);
-    if (flowGoCaller.kind === "error") {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, flowGoCaller.message));
-      return;
-    }
     const requestedAgentId = normalizeOptionalString(p.agentId);
     const requestedAllAgents = p.agentScope === "all";
     if (requestedAllAgents && (requestedAgentId || specificKey)) {
@@ -1036,14 +1010,7 @@ export const usageHandlers: GatewayRequestHandlers = {
           agentId: effectiveAgentId,
         })
       : store;
-    const scopedStore =
-      flowGoCaller.kind === "flowgo"
-        ? Object.fromEntries(
-            Object.entries(agentScopedStore).filter(
-              ([, entry]) => entry?.flowGoOwnerDeviceId === flowGoCaller.deviceId,
-            ),
-          )
-        : agentScopedStore;
+    const scopedStore = agentScopedStore;
     const now = Date.now();
 
     const mergedEntries: MergedEntry[] = [];
@@ -1123,42 +1090,12 @@ export const usageHandlers: GatewayRequestHandlers = {
       }
     } else {
       // Full discovery for list view
-      const discoveredSessions =
-        flowGoCaller.kind === "flowgo"
-          ? (
-              await Promise.all(
-                Array.from(
-                  new Set(
-                    Object.keys(scopedStore).map(
-                      (key) => parseAgentSessionKey(key)?.agentId ?? resolveDefaultAgentId(config),
-                    ),
-                  ),
-                ).map((agentId) =>
-                  discoverAllSessionsForUsage({ config, agentId, startMs, endMs }),
-                ),
-              )
-            ).flat()
-          : await discoverAllSessionsForUsage({
-              config,
-              ...(effectiveAgentId ? { agentId: effectiveAgentId } : {}),
-              startMs,
-              endMs,
-            });
-      const allowedDiscoveredSessions =
-        flowGoCaller.kind === "flowgo"
-          ? (() => {
-              const ownedSessionIds = new Set<string>();
-              for (const entry of Object.values(scopedStore)) {
-                if (entry?.sessionId) {
-                  ownedSessionIds.add(entry.sessionId);
-                }
-                for (const familySessionId of entry?.usageFamilySessionIds ?? []) {
-                  ownedSessionIds.add(familySessionId);
-                }
-              }
-              return discoveredSessions.filter((entry) => ownedSessionIds.has(entry.sessionId));
-            })()
-          : discoveredSessions;
+      const discoveredSessions = await discoverAllSessionsForUsage({
+        config,
+        ...(effectiveAgentId ? { agentId: effectiveAgentId } : {}),
+        startMs,
+        endMs,
+      });
 
       // Build a map of sessionId -> store entry for quick lookup
       const storeBySessionId = buildStoreBySessionId(scopedStore);
@@ -1171,7 +1108,7 @@ export const usageHandlers: GatewayRequestHandlers = {
         }
       }
 
-      for (const discovered of allowedDiscoveredSessions) {
+      for (const discovered of discoveredSessions) {
         const storeMatch = storeBySessionId.get(discovered.sessionId);
         if (storeMatch) {
           // Named session from store
@@ -1575,7 +1512,7 @@ export const usageHandlers: GatewayRequestHandlers = {
 
     respond(true, result, undefined);
   },
-  "sessions.usage.timeseries": async ({ respond, params, context, client }) => {
+  "sessions.usage.timeseries": async ({ respond, params, context }) => {
     const key = normalizeOptionalString(params?.key) ?? null;
     if (!key) {
       respond(
@@ -1585,10 +1522,6 @@ export const usageHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    if (!(await authorizeFlowGoUsageKey({ client, key, respond }))) {
-      return;
-    }
-
     const resolved = resolveSessionUsageFileOrRespond(key, respond, context.getRuntimeConfig());
     if (!resolved) {
       return;
@@ -1615,16 +1548,12 @@ export const usageHandlers: GatewayRequestHandlers = {
 
     respond(true, timeseries, undefined);
   },
-  "sessions.usage.logs": async ({ respond, params, context, client }) => {
+  "sessions.usage.logs": async ({ respond, params, context }) => {
     const key = normalizeOptionalString(params?.key) ?? null;
     if (!key) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "key is required for logs"));
       return;
     }
-    if (!(await authorizeFlowGoUsageKey({ client, key, respond }))) {
-      return;
-    }
-
     const limit =
       typeof params?.limit === "number" && Number.isFinite(params.limit)
         ? Math.min(params.limit, 1000)

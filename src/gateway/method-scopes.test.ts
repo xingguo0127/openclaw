@@ -55,7 +55,6 @@ describe("method scope resolution", () => {
     ["environments.status", ["operator.read"]],
     ["diagnostics.stability", ["operator.read"]],
     ["node.pair.approve", ["operator.pairing"]],
-    ["device.agent.bind", ["operator.pairing"]],
     ["poll", ["operator.write"]],
     ["talk.client.create", ["operator.write"]],
     ["talk.client.toolCall", ["operator.write"]],
@@ -294,16 +293,6 @@ describe("operator scope authorization", () => {
     });
   });
 
-  it("requires pairing scope for device Agent binding", () => {
-    expect(authorizeOperatorScopesForMethod("device.agent.bind", ["operator.pairing"])).toEqual({
-      allowed: true,
-    });
-    expect(authorizeOperatorScopesForMethod("device.agent.bind", ["operator.write"])).toEqual({
-      allowed: false,
-      missingScope: "operator.pairing",
-    });
-  });
-
   it.each(["exec.approval.get", "exec.approval.list", "exec.approval.resolve"])(
     "requires approvals scope for %s",
     (method) => {
@@ -402,11 +391,6 @@ describe("core gateway method classification", () => {
       (method) => !isGatewayMethodClassified(method),
     );
     expect(unclassified).toStrictEqual([]);
-  });
-
-  it("exposes FlowGo agent binding through the core gateway registry", () => {
-    expect(listGatewayMethods()).toContain("device.agent.bind");
-    expect(coreGatewayHandlers).toHaveProperty("device.agent.bind");
   });
 
   it("exposes skill proposal methods through the core gateway registry", () => {

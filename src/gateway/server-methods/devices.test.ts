@@ -12,7 +12,6 @@ import type { GatewayRequestHandlerOptions } from "./types.js";
 
 const {
   approveDevicePairingMock,
-  bindFlowGoDeviceAgentMock,
   getPairedDeviceMock,
   getPendingDevicePairingMock,
   listDevicePairingMock,
@@ -22,7 +21,6 @@ const {
   rotateDeviceTokenMock,
 } = vi.hoisted(() => ({
   approveDevicePairingMock: vi.fn(),
-  bindFlowGoDeviceAgentMock: vi.fn(),
   getPairedDeviceMock: vi.fn(),
   getPendingDevicePairingMock: vi.fn(),
   listDevicePairingMock: vi.fn(),
@@ -43,7 +41,6 @@ vi.mock("../../infra/device-pairing.js", async () => {
   return {
     ...actual,
     approveDevicePairing: approveDevicePairingMock,
-    bindFlowGoDeviceAgent: bindFlowGoDeviceAgentMock,
     getPairedDevice: getPairedDeviceMock,
     getPendingDevicePairing: getPendingDevicePairingMock,
     listDevicePairing: listDevicePairingMock,
@@ -884,196 +881,6 @@ describe("deviceHandlers", () => {
       },
       undefined,
     );
-  });
-
-  it("projects FlowGo bindings without exposing public keys", async () => {
-    listDevicePairingMock.mockResolvedValue({
-      pending: [],
-      paired: [
-        {
-          deviceId: "flowgo-default",
-          publicKey: "secret-public-key-1",
-          clientId: "openclaw-pet",
-          clientMode: "ui",
-          platform: "linux",
-          deviceFamily: "RaspberryPi",
-          modelIdentifier: "FlowGo",
-          role: "operator",
-          approvedAtMs: 100,
-          createdAtMs: 50,
-        },
-        {
-          deviceId: "flowgo-missing-agent",
-          publicKey: "secret-public-key-2",
-          clientId: "openclaw-pet",
-          clientMode: "ui",
-          platform: "linux",
-          deviceFamily: "RaspberryPi",
-          modelIdentifier: "FlowGo",
-          role: "operator",
-          boundAgentId: "deleted-agent",
-          bindingRevision: 4,
-          approvedAtMs: 200,
-          createdAtMs: 60,
-        },
-      ],
-    });
-    const opts = createOptions("device.pair.list", {});
-
-    await deviceHandlers["device.pair.list"](opts);
-
-    const response = vi.mocked(opts.respond).mock.calls[0]?.[1] as {
-      paired: Array<Record<string, unknown>>;
-    };
-    expect(response.paired[0]).toMatchObject({
-      deviceId: "flowgo-default",
-      deviceType: "pet",
-      deviceModel: "flowgo",
-      effectiveAgentId: "main",
-      agentAvailability: "available",
-      bindingRevision: 0,
-    });
-    expect(response.paired[1]).toMatchObject({
-      deviceId: "flowgo-missing-agent",
-      boundAgentId: "deleted-agent",
-      agentAvailability: "unavailable",
-      bindingRevision: 4,
-    });
-    expect(response.paired[1]).not.toHaveProperty("effectiveAgentId");
-    expect(JSON.stringify(response)).not.toContain("secret-public-key");
-  });
-
-  it("binds a FlowGo device for an admin and returns the new revision", async () => {
-    bindFlowGoDeviceAgentMock.mockResolvedValue({
-      ok: true,
-      deviceId: "flowgo-1",
-      previousBoundAgentId: "main",
-      boundAgentId: "pet-agent",
-      bindingRevision: 3,
-    });
-    const opts = createOptions(
-      "device.agent.bind",
-      {
-        deviceId: "flowgo-1",
-        agentId: "pet-agent",
-        expectedRevision: 2,
-      },
-      { client: createClient(["operator.admin"], "admin-device", { isDeviceTokenAuth: true }) },
-    );
-    const captured = captureSecurityEvents();
-
-    try {
-      await deviceHandlers["device.agent.bind"](opts);
-    } finally {
-      captured.stop();
-    }
-
-    expect(bindFlowGoDeviceAgentMock).toHaveBeenCalledWith({
-      deviceId: "flowgo-1",
-      agentId: "pet-agent",
-      expectedRevision: 2,
-    });
-    expect(opts.respond).toHaveBeenCalledWith(
-      true,
-      expect.objectContaining({ boundAgentId: "pet-agent", bindingRevision: 3 }),
-      undefined,
-    );
-    expect(captured.events).toHaveLength(1);
-    expect(captured.events[0]).toMatchObject({
-      action: "device.agent.binding",
-      outcome: "success",
-      actor: {
-        kind: "operator",
-        deviceIdHash: expect.stringMatching(/^sha256:[a-f0-9]{12}$/u),
-        role: "admin",
-      },
-      target: { kind: "device", idHash: expect.stringMatching(/^sha256:[a-f0-9]{12}$/u) },
-      policy: { id: "gateway.flowgo-agent-binding", decision: "allow" },
-      control: { id: "device.agent.bind", family: "auth" },
-      attributes: {
-        previous_agent_id: "main",
-        requested_agent_id: "pet-agent",
-        expected_revision: 2,
-        binding_revision: 3,
-      },
-    });
-    expect(JSON.stringify(captured.events)).not.toContain("admin-device");
-    expect(JSON.stringify(captured.events)).not.toContain("flowgo-1");
-  });
-
-  it("rejects cross-device, unknown-Agent, and stale FlowGo binding writes", async () => {
-    const crossDevice = createOptions(
-      "device.agent.bind",
-      { deviceId: "flowgo-2", agentId: "pet-agent", expectedRevision: 0 },
-      { client: createClient(["operator.pairing"], "flowgo-1", { isDeviceTokenAuth: true }) },
-    );
-    await deviceHandlers["device.agent.bind"](crossDevice);
-    expect(bindFlowGoDeviceAgentMock).not.toHaveBeenCalled();
-
-    const unknownAgent = createOptions(
-      "device.agent.bind",
-      {
-        deviceId: "flowgo-1",
-        agentId: "missing-agent",
-        expectedRevision: 0,
-      },
-      { client: createClient(["operator.admin"]) },
-    );
-    await deviceHandlers["device.agent.bind"](unknownAgent);
-    expect(bindFlowGoDeviceAgentMock).not.toHaveBeenCalled();
-
-    bindFlowGoDeviceAgentMock.mockResolvedValue({
-      ok: false,
-      reason: "revision-conflict",
-      bindingRevision: 2,
-    });
-    const stale = createOptions(
-      "device.agent.bind",
-      {
-        deviceId: "flowgo-1",
-        agentId: "pet-agent",
-        expectedRevision: 1,
-      },
-      { client: createClient(["operator.admin"]) },
-    );
-    await deviceHandlers["device.agent.bind"](stale);
-    expect(stale.respond).toHaveBeenCalledWith(
-      false,
-      undefined,
-      expect.objectContaining({ message: expect.stringContaining("current revision 2") }),
-    );
-  });
-
-  it("requires admin scope and rejects FlowGo self-binding", async () => {
-    const sharedPairing = createOptions(
-      "device.agent.bind",
-      { deviceId: "flowgo-1", agentId: "pet-agent", expectedRevision: 0 },
-      { client: createClient(["operator.pairing"]) },
-    );
-    await deviceHandlers["device.agent.bind"](sharedPairing);
-    expect(bindFlowGoDeviceAgentMock).not.toHaveBeenCalled();
-
-    const selfPairing = createOptions(
-      "device.agent.bind",
-      { deviceId: "flowgo-1", agentId: "pet-agent", expectedRevision: 0 },
-      { client: createClient(["operator.pairing"], "flowgo-1", { isDeviceTokenAuth: true }) },
-    );
-    await deviceHandlers["device.agent.bind"](selfPairing);
-    expect(bindFlowGoDeviceAgentMock).not.toHaveBeenCalled();
-
-    bindFlowGoDeviceAgentMock.mockResolvedValue({
-      ok: true,
-      deviceId: "flowgo-1",
-      boundAgentId: "pet-agent",
-      bindingRevision: 1,
-    });
-    const admin = createOptions(
-      "device.agent.bind",
-      { deviceId: "flowgo-1", agentId: "pet-agent", expectedRevision: 0 },
-      { client: createClient(["operator.admin"]) },
-    );
-    await deviceHandlers["device.agent.bind"](admin);
-    expect(bindFlowGoDeviceAgentMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects approving another device from a non-admin device session", async () => {

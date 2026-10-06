@@ -416,14 +416,14 @@ describe("flowos task-center auth", () => {
       params: {},
       client: gatewayClient({
         isDeviceTokenAuth: true,
-        connect: { role: "node", device: { id: "flowgo" } },
+        connect: { role: "node", device: { id: "terminal" } },
       }),
       respond,
     });
     expect(respond.mock.calls[0][0]).toBe(false);
   });
 
-  it("provisions the scanned FlowGo identity with a bounded operator token", async () => {
+  it("provisions the scanned AgentTerminal identity with a bounded operator token", async () => {
     const publicKeyBytes = Buffer.alloc(32, 7);
     const publicKey = publicKeyBytes.toString("base64url");
     const deviceId = createHash("sha256").update(publicKeyBytes).digest("hex");
@@ -435,32 +435,32 @@ describe("flowos task-center auth", () => {
     });
     pairingMocks.approve.mockResolvedValue({
       status: "approved",
-      device: { deviceId: "flowgo-1" },
+      device: { deviceId: "terminal-1" },
     });
-    pairingMocks.ensure.mockResolvedValue({ token: "flowgo-device-token" });
+    pairingMocks.ensure.mockResolvedValue({ token: "terminal-device-token" });
     const { calls } = setup();
     const [, handler, options] = method(calls, "flowos.deviceOnboardingProvision");
     expect(options).toEqual({ scope: "operator.admin" });
     const respond = vi.fn();
     await invoke(handler, {
-      params: { deviceId, devicePublicKey: publicKey },
+      params: { deviceId, devicePublicKey: publicKey, deviceType: "AgentTerminal" },
       client: pairedOperator(),
       respond,
     });
     expect(respond).toHaveBeenCalledWith(true, {
       deviceId,
       devicePublicKey: publicKey,
-      deviceToken: "flowgo-device-token",
+      deviceToken: "terminal-device-token",
     });
     expect(pairingMocks.request).toHaveBeenCalledWith(
       expect.objectContaining({
         deviceId,
         publicKey,
-        platform: "linux",
-        deviceFamily: "RaspberryPi",
-        clientId: "openclaw-pet",
+        platform: "esp32",
+        deviceFamily: "ESP32",
+        clientId: "gateway-client",
         clientMode: "ui",
-        modelIdentifier: "FlowGo",
+        modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
         role: "operator",
         scopes: ["operator.read", "operator.write"],
       }),
@@ -474,18 +474,18 @@ describe("flowos task-center auth", () => {
     pairingMocks.get.mockResolvedValue({
       deviceId,
       publicKey,
-      clientId: "openclaw-pet",
+      clientId: "gateway-client",
       clientMode: "ui",
-      platform: "linux",
-      deviceFamily: "RaspberryPi",
-      modelIdentifier: "FlowGo",
+      platform: "esp32",
+      deviceFamily: "ESP32",
+      modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
     });
     pairingMocks.ensure.mockResolvedValue({ token: "stable-device-token" });
     const { calls } = setup();
     const [, handler] = method(calls, "flowos.deviceOnboardingProvision");
     const respond = vi.fn();
     await invoke(handler, {
-      params: { deviceId, devicePublicKey: publicKey },
+      params: { deviceId, devicePublicKey: publicKey, deviceType: "AgentTerminal" },
       client: pairedOperator(),
       respond,
     });
@@ -497,83 +497,21 @@ describe("flowos task-center auth", () => {
     expect(pairingMocks.approve).not.toHaveBeenCalled();
   });
 
-  it("provisions AgentTerminal without changing the FlowGo profile", async () => {
+  it("rejects onboarding requests for device types other than AgentTerminal", async () => {
     const bytes = Buffer.alloc(32, 11);
     const publicKey = bytes.toString("base64url");
     const deviceId = createHash("sha256").update(bytes).digest("hex");
-    pairingMocks.get.mockResolvedValue(null);
-    pairingMocks.request.mockResolvedValue({ request: { requestId: "terminal-1" } });
-    pairingMocks.approve.mockResolvedValue({ status: "approved", device: { deviceId } });
-    pairingMocks.ensure.mockResolvedValue({ token: "terminal-device-token" });
     const { calls } = setup();
     const [, handler] = method(calls, "flowos.deviceOnboardingProvision");
-    const respond = vi.fn();
-    await invoke(handler, {
-      params: { deviceId, devicePublicKey: publicKey, deviceType: "AgentTerminal" },
-      client: pairedOperator(),
-      respond,
-    });
-    expect(respond.mock.calls[0][0]).toBe(true);
-    expect(pairingMocks.request).toHaveBeenCalledWith(
-      expect.objectContaining({
-        clientId: "gateway-client",
-        platform: "esp32",
-        deviceFamily: "ESP32",
-        modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
-        scopes: ["operator.read", "operator.write"],
-      }),
-    );
-  });
-
-  it("repairs the legacy FlowGo identity to the current client contract", async () => {
-    const publicKeyBytes = Buffer.alloc(32, 9);
-    const publicKey = publicKeyBytes.toString("base64url");
-    const deviceId = createHash("sha256").update(publicKeyBytes).digest("hex");
-    pairingMocks.get.mockResolvedValue({
-      deviceId,
-      publicKey,
-      clientId: "gateway-client",
-      clientMode: "ui",
-      platform: "linux",
-      deviceFamily: "RaspberryPi",
-    });
-    pairingMocks.request.mockResolvedValue({
-      status: "pending",
-      created: true,
-      request: { requestId: "repair-1" },
-    });
-    pairingMocks.approve.mockResolvedValue({
-      status: "approved",
-      device: { deviceId },
-    });
-    pairingMocks.ensure.mockResolvedValue({ token: "repaired-device-token" });
-    const { calls } = setup();
-    const [, handler] = method(calls, "flowos.deviceOnboardingProvision");
-    const respond = vi.fn();
-    await invoke(handler, {
-      params: { deviceId, devicePublicKey: publicKey },
-      client: pairedOperator(),
-      respond,
-    });
-    expect(pairingMocks.request).toHaveBeenCalledWith(
-      expect.objectContaining({
-        deviceId,
-        publicKey,
-        clientId: "openclaw-pet",
-        clientMode: "ui",
-        platform: "linux",
-        deviceFamily: "RaspberryPi",
-        modelIdentifier: "FlowGo",
-      }),
-    );
-    expect(pairingMocks.approve).toHaveBeenCalledWith("repair-1", {
-      callerScopes: ["operator.read", "operator.write", "operator.admin"],
-    });
-    expect(respond).toHaveBeenCalledWith(true, {
-      deviceId,
-      devicePublicKey: publicKey,
-      deviceToken: "repaired-device-token",
-    });
+    for (const params of [
+      { deviceId, devicePublicKey: publicKey },
+      { deviceId, devicePublicKey: publicKey, deviceType: "pet" },
+    ]) {
+      const respond = vi.fn();
+      await invoke(handler, { params, client: pairedOperator(), respond });
+      expect(respond.mock.calls[0][0]).toBe(false);
+    }
+    expect(pairingMocks.request).not.toHaveBeenCalled();
   });
 
   it("issues proactive-service tokens on their own audience", async () => {

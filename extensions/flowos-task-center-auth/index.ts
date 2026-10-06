@@ -591,22 +591,13 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
       const input = params ?? {};
       const deviceId = normalizedString(input.deviceId);
       const publicKey = normalizedString(input.devicePublicKey);
-      const terminal = input.deviceType === "AgentTerminal";
-      const profile = terminal
-        ? {
-            displayName: "FlowOS Agent Terminal",
-            platform: "esp32",
-            deviceFamily: "ESP32",
-            clientId: "gateway-client",
-            modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
-          }
-        : {
-            displayName: "FlowGo",
-            platform: "linux",
-            deviceFamily: "RaspberryPi",
-            clientId: "openclaw-pet",
-            modelIdentifier: "FlowGo",
-          };
+      const profile = {
+        displayName: "FlowOS Agent Terminal",
+        platform: "esp32",
+        deviceFamily: "ESP32",
+        clientId: "gateway-client",
+        modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
+      };
       let publicKeyBytes: Buffer;
       try {
         publicKeyBytes = Buffer.from(publicKey, "base64url");
@@ -622,12 +613,8 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
         return;
       }
       if (
-        !hasExactKeys(
-          input,
-          terminal
-            ? ["deviceId", "devicePublicKey", "deviceType"]
-            : ["deviceId", "devicePublicKey"],
-        ) ||
+        input.deviceType !== "AgentTerminal" ||
+        !hasExactKeys(input, ["deviceId", "devicePublicKey", "deviceType"]) ||
         !validIdentifier(deviceId) ||
         publicKeyBytes.length !== 32 ||
         publicKeyBytes.toString("base64url") !== publicKey ||
@@ -640,36 +627,27 @@ function registerDeviceOnboardingProvisionMethod(api: OpenClawPluginApi): void {
         const existing = await getPairedDevice(deviceId);
         if (existing) {
           const samePublicKey = existing.publicKey === publicKey;
-          const isCurrentFlowGoIdentity =
+          const isCurrentIdentity =
             existing.clientId === profile.clientId &&
             existing.clientMode === "ui" &&
             existing.platform === profile.platform &&
             existing.deviceFamily === profile.deviceFamily &&
             existing.modelIdentifier === profile.modelIdentifier;
-          const isLegacyFlowGoIdentity =
-            !terminal &&
-            existing.clientId === "gateway-client" &&
-            existing.clientMode === "ui" &&
-            existing.platform === "linux" &&
-            existing.deviceFamily === "RaspberryPi" &&
-            !existing.modelIdentifier;
-          if (!samePublicKey || (!isCurrentFlowGoIdentity && !isLegacyFlowGoIdentity)) {
+          if (!samePublicKey || !isCurrentIdentity) {
             reject(respond, "existing device identity does not match onboarding request");
             return;
           }
-          if (isCurrentFlowGoIdentity) {
-            const token = await ensureDeviceToken({
-              deviceId,
-              role: "operator",
-              scopes: ["operator.read", "operator.write"],
-            });
-            if (!token) {
-              reject(respond, "device token is unavailable");
-              return;
-            }
-            respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
+          const token = await ensureDeviceToken({
+            deviceId,
+            role: "operator",
+            scopes: ["operator.read", "operator.write"],
+          });
+          if (!token) {
+            reject(respond, "device token is unavailable");
             return;
           }
+          respond(true, { deviceId, devicePublicKey: publicKey, deviceToken: token.token });
+          return;
         }
         const requested = await requestDevicePairing({
           deviceId,

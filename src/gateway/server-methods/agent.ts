@@ -140,10 +140,6 @@ import {
   resolveChatAttachmentMaxBytes,
 } from "../chat-attachments.js";
 import { resolveAssistantAvatarUrl } from "../control-ui-shared.js";
-import {
-  flowGoRequestedSessionIdMatchesOwnedEntry,
-  resolveFlowGoNewSessionRoute,
-} from "../flowgo-device-routing.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
 import {
   emitGatewaySessionEndPluginHook,
@@ -1170,27 +1166,6 @@ export const agentHandlers: GatewayRequestHandlers = {
     const providerOverride = allowModelOverride ? request.provider : undefined;
     const modelOverride = allowModelOverride ? request.model : undefined;
     const cfg = context.getRuntimeConfig();
-    const initialSessionKey = normalizeOptionalString(request.sessionKey);
-    const initialSessionEntry = initialSessionKey
-      ? loadSessionEntry(initialSessionKey).entry
-      : undefined;
-    const flowGoForceNewSession = RESET_COMMAND_RE.test(request.message.trim());
-    const flowGoRoute = await resolveFlowGoNewSessionRoute({
-      client,
-      cfg,
-      existingSessionOwnerDeviceId: initialSessionEntry?.flowGoOwnerDeviceId,
-      forceNewSession: flowGoForceNewSession,
-      requestedAgentId: normalizeOptionalString(request.agentId),
-      requestedSessionKey: initialSessionKey,
-    });
-    if (flowGoRoute.kind === "error") {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, flowGoRoute.message));
-      return;
-    }
-    if (flowGoRoute.kind === "route") {
-      request.agentId = flowGoRoute.agentId;
-      request.sessionKey = flowGoRoute.sessionKey;
-    }
     const idem = request.idempotencyKey;
     const runId = idem;
     const lifecycleGeneration = getAgentEventLifecycleGeneration();
@@ -1511,28 +1486,6 @@ export const agentHandlers: GatewayRequestHandlers = {
             agentId,
           })
         : undefined);
-    const flowGoSessionEntry = requestedSessionKey
-      ? loadSessionEntry(requestedSessionKey).entry
-      : undefined;
-    const flowGoOwnedEntrySessionId =
-      flowGoRoute.kind === "route" &&
-      flowGoSessionEntry?.flowGoOwnerDeviceId === flowGoRoute.ownerDeviceId
-        ? flowGoSessionEntry.sessionId
-        : undefined;
-    if (
-      !flowGoRequestedSessionIdMatchesOwnedEntry({
-        route: flowGoRoute,
-        requestedSessionId,
-        ownedEntrySessionId: flowGoOwnedEntrySessionId,
-      })
-    ) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "FlowGo sessionId does not match its owned session"),
-      );
-      return;
-    }
     if (agentId && requestedSessionKeyRaw) {
       const parsedRequestedSessionKey = parseAgentSessionKey(requestedSessionKeyRaw);
       const requestedCanonicalKey = resolveSessionStoreKey({
@@ -1956,8 +1909,6 @@ export const agentHandlers: GatewayRequestHandlers = {
           : false;
         const canReuseSession =
           Boolean(entry?.sessionId) &&
-          (flowGoRoute.kind !== "route" ||
-            entry?.flowGoOwnerDeviceId === flowGoRoute.ownerDeviceId) &&
           (freshness?.fresh ?? false) &&
           !failedSessionTranscriptMissing &&
           !terminalMainTranscriptNewerThanRegistry;
@@ -2111,8 +2062,6 @@ export const agentHandlers: GatewayRequestHandlers = {
             resolveFailedSessionTranscriptMissingForEntry(freshEntry);
           const freshCanReuseSession =
             Boolean(freshEntry?.sessionId) &&
-            (flowGoRoute.kind !== "route" ||
-              freshEntry?.flowGoOwnerDeviceId === flowGoRoute.ownerDeviceId) &&
             (freshFreshness?.fresh ?? false) &&
             !freshFailedSessionTranscriptMissing &&
             !freshTerminalMainTranscriptNewerThanRegistry;
@@ -2165,9 +2114,6 @@ export const agentHandlers: GatewayRequestHandlers = {
             groupChannel: nextGroup.groupChannel,
             space: nextGroup.groupSpace,
             ...(pluginOwnerId ? { pluginOwnerId } : {}),
-            ...(flowGoRoute.kind === "route"
-              ? { flowGoOwnerDeviceId: flowGoRoute.ownerDeviceId }
-              : {}),
             ...(shouldClearRotatedState
               ? {
                   status: undefined,

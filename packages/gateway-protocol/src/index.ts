@@ -174,8 +174,6 @@ import {
   CronStatusParamsSchema,
   type CronUpdateParams,
   CronUpdateParamsSchema,
-  type DeviceAgentBindParams,
-  DeviceAgentBindParamsSchema,
   type DevicePairApproveParams,
   DevicePairApproveParamsSchema,
   type DevicePairListParams,
@@ -845,9 +843,6 @@ export const validateCronRunsParams = lazyCompile<CronRunsParams>(CronRunsParams
 export const validateDevicePairListParams = lazyCompile<DevicePairListParams>(
   DevicePairListParamsSchema,
 );
-export const validateDeviceAgentBindParams = lazyCompile<DeviceAgentBindParams>(
-  DeviceAgentBindParamsSchema,
-);
 export const validateDevicePairApproveParams = lazyCompile<DevicePairApproveParams>(
   DevicePairApproveParamsSchema,
 );
@@ -1228,7 +1223,6 @@ export type {
   NodePairRequestParams,
   NodePairListParams,
   NodePairApproveParams,
-  DeviceAgentBindParams,
   DevicePairListParams,
   DevicePairApproveParams,
   DevicePairRejectParams,

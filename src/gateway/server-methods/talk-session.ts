@@ -20,16 +20,9 @@ import {
 import { REALTIME_VOICE_AGENT_CONSULT_TOOL } from "../../talk/agent-consult-tool.js";
 import { REALTIME_VOICE_AGENT_CONTROL_TOOL } from "../../talk/agent-run-control-shared.js";
 import { controlRealtimeVoiceAgentRun } from "../../talk/agent-run-control.js";
-import {
-  FLOWGO_EXPRESSION_CAPABILITY,
-  FLOWGO_EXPRESSION_INSTRUCTIONS,
-  FLOWGO_EXPRESSION_TOOL,
-} from "../../talk/flowgo-expression-tool.js";
 import { resolveConfiguredRealtimeVoiceProvider } from "../../talk/provider-resolver.js";
 import type { TalkBrain, TalkMode, TalkTransport } from "../../talk/talk-events.js";
-import { resolveFlowGoNewSessionRoute } from "../flowgo-device-routing.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
-import { loadSessionEntry } from "../session-utils.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
 import {
   cancelTalkHandoffTurn,
@@ -221,25 +214,7 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
     const mode = normalizeTalkSessionMode(params);
     const transport = normalizeTalkSessionTransport({ mode, transport: params.transport });
     const brain = normalizeTalkSessionBrain({ mode, brain: params.brain });
-    let routedSessionKey = normalizeOptionalString(params.sessionKey);
-
-    if (mode === "realtime" && transport === "gateway-relay" && brain === "agent-consult") {
-      const runtimeConfig = context.getRuntimeConfig();
-      const existingEntry = routedSessionKey ? loadSessionEntry(routedSessionKey).entry : undefined;
-      const flowGoRoute = await resolveFlowGoNewSessionRoute({
-        client,
-        cfg: runtimeConfig,
-        existingSessionOwnerDeviceId: existingEntry?.flowGoOwnerDeviceId,
-        requestedSessionKey: routedSessionKey,
-      });
-      if (flowGoRoute.kind === "error") {
-        respondInvalidRequest(respond, flowGoRoute.message);
-        return;
-      }
-      if (flowGoRoute.kind === "route") {
-        routedSessionKey = flowGoRoute.sessionKey;
-      }
-    }
+    const routedSessionKey = normalizeOptionalString(params.sessionKey);
 
     if (transport === "webrtc" || transport === "provider-websocket") {
       respondInvalidRequest(
@@ -354,36 +329,16 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
         );
         const effectiveModel = normalizeOptionalString(providerConfig.model) ?? launchOptions.model;
         const forceAgentConsult = realtimeConfig.consultRouting === "force-agent-consult";
-        const capabilities = resolution.provider.capabilities;
-        const supportsToolCalls =
-          capabilities?.supportsToolCalls === true &&
-          (capabilities.supportsToolCallsForModel?.(effectiveModel) ?? true);
-        const requestedCapabilities = new Set(params.clientCapabilities ?? []);
-        const flowgoExpressionEnabled =
-          !forceAgentConsult &&
-          supportsToolCalls &&
-          capabilities?.supportsResponseToolCallCorrelation === true &&
-          requestedCapabilities.has(FLOWGO_EXPRESSION_CAPABILITY);
-        const negotiatedCapabilities = flowgoExpressionEnabled
-          ? [FLOWGO_EXPRESSION_CAPABILITY]
-          : [];
         const tools = forceAgentConsult
           ? []
-          : [
-              REALTIME_VOICE_AGENT_CONSULT_TOOL,
-              REALTIME_VOICE_AGENT_CONTROL_TOOL,
-              ...(flowgoExpressionEnabled ? [FLOWGO_EXPRESSION_TOOL] : []),
-            ];
+          : [REALTIME_VOICE_AGENT_CONSULT_TOOL, REALTIME_VOICE_AGENT_CONTROL_TOOL];
         const session = createTalkRealtimeRelaySession({
           context,
           connId,
           cfg: runtimeConfig,
           provider: resolution.provider,
           providerConfig,
-          instructions: [
-            buildRealtimeInstructions(realtimeConfig.instructions),
-            ...(flowgoExpressionEnabled ? [FLOWGO_EXPRESSION_INSTRUCTIONS] : []),
-          ].join("\n\n"),
+          instructions: buildRealtimeInstructions(realtimeConfig.instructions),
           // force 模式下网关每轮强制转交,provider 无需(也不应)持有任何工具 —— 否则:
           //   ①调 consult → 与强制转交双重进 DeepSeek(文本去重按串匹配,改写 vs 原话 → 去重失效);
           //   ②调 control → app 侧把 control 重路由成 consult,同样双重。
@@ -405,7 +360,7 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           ...(routedSessionKey ? { sessionKey: routedSessionKey } : {}),
           mode,
           brain,
-          negotiatedCapabilities,
+          negotiatedCapabilities: [],
         });
         return;
       }
