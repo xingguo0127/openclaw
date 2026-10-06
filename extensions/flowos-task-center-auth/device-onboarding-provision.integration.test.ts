@@ -5,7 +5,12 @@ import path from "node:path";
 import type { GatewayRequestHandlerOptions } from "openclaw/plugin-sdk/gateway-runtime";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getPairedDevice, verifyDeviceToken } from "../../src/infra/device-pairing.js";
+import {
+  approveDevicePairing,
+  getPairedDevice,
+  requestDevicePairing,
+  verifyDeviceToken,
+} from "../../src/infra/device-pairing.js";
 import plugin from "./index.js";
 
 const originalStateDir = process.env.OPENCLAW_STATE_DIR;
@@ -23,6 +28,70 @@ afterEach(() => {
 });
 
 describe("FlowOS device onboarding provisioning", () => {
+  it("upgrades an existing terminal approval to FloAI operator scopes and reuses the upgraded token", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowos-terminal-permissions-"));
+    temporaryDirs.push(stateDir);
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    const scopes = [
+      "operator.read",
+      "operator.write",
+      "operator.pairing",
+      "operator.talk.secrets",
+      "operator.admin",
+    ];
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const bytes = publicKey.export({ format: "der", type: "spki" }).subarray(-32);
+    const publicKeyText = bytes.toString("base64url");
+    const deviceId = createHash("sha256").update(bytes).digest("hex");
+    const pending = await requestDevicePairing({
+      deviceId,
+      publicKey: publicKeyText,
+      clientId: "gateway-client",
+      clientMode: "ui",
+      platform: "esp32",
+      deviceFamily: "ESP32",
+      modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
+      role: "operator",
+      scopes: ["operator.read", "operator.write"],
+      silent: false,
+    });
+    await approveDevicePairing(pending.request.requestId, { callerScopes: scopes });
+    const registerGatewayMethod = vi.fn();
+    plugin.register({
+      pluginConfig: { userId: "alice", tenantId: "tenant-a" },
+      config: { gateway: { auth: {} } },
+      registerGatewayMethod,
+      registerTool: vi.fn(),
+      runtime: { state: { openKeyedStore: () => ({ register: vi.fn(), lookup: vi.fn() }) } },
+    } as never);
+    const registration = registerGatewayMethod.mock.calls.find(
+      ([name]) => name === "flowos.deviceOnboardingProvision",
+    ) as [string, Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1], { scope: string }];
+    const request = {
+      req: {} as never,
+      params: { deviceId, devicePublicKey: publicKeyText, deviceType: "AgentTerminal" },
+      client: {
+        isDeviceTokenAuth: true,
+        connect: { role: "operator", scopes, device: { id: "android-owner" } },
+      } as never,
+      isWebchatConnect: () => false,
+      context: {} as GatewayRequestHandlerOptions["context"],
+    };
+    const respond = vi.fn();
+    await registration[1]({ ...request, respond });
+    expect(respond.mock.calls[0][0]).toBe(true);
+    const result = respond.mock.calls[0][1] as { deviceId: string; deviceToken: string };
+    await expect(getPairedDevice(deviceId)).resolves.toMatchObject({
+      approvedScopes: expect.arrayContaining(scopes),
+    });
+    await expect(
+      verifyDeviceToken({ deviceId, token: result.deviceToken, role: "operator", scopes }),
+    ).resolves.toEqual({ ok: true });
+    const retry = vi.fn();
+    await registration[1]({ ...request, respond: retry });
+    expect(retry.mock.calls[0][1]).toMatchObject({ deviceToken: result.deviceToken });
+  });
+
   it("creates a real paired identity whose returned token passes Gateway verification", async () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowos-onboarding-pairing-"));
     temporaryDirs.push(stateDir);
@@ -79,14 +148,26 @@ describe("FlowOS device onboarding provisioning", () => {
       clientMode: "ui",
       modelIdentifier: "ESP32-S3-Touch-AMOLED-1.75C",
       role: "operator",
-      scopes: ["operator.read", "operator.write"],
+      scopes: [
+        "operator.read",
+        "operator.write",
+        "operator.pairing",
+        "operator.talk.secrets",
+        "operator.admin",
+      ],
     });
     await expect(
       verifyDeviceToken({
         deviceId: result.deviceId,
         token: result.deviceToken,
         role: "operator",
-        scopes: ["operator.read", "operator.write"],
+        scopes: [
+          "operator.read",
+          "operator.write",
+          "operator.pairing",
+          "operator.talk.secrets",
+          "operator.admin",
+        ],
       }),
     ).resolves.toEqual({ ok: true });
 
