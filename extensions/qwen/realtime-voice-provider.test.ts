@@ -11,7 +11,7 @@ describe("Qwen realtime tool contract", () => {
     const tools = toQwenRealtimeTools([
       {
         type: "function",
-        name: "flowgo_show_expression",
+        name: "show_expression",
         description: "Show a bounded expression without speaking its result.",
         parameters: {
           type: "object",
@@ -33,7 +33,7 @@ describe("Qwen realtime tool contract", () => {
       {
         type: "function",
         function: expect.objectContaining({
-          name: "flowgo_show_expression",
+          name: "show_expression",
           parameters: expect.objectContaining({
             additionalProperties: false,
             required: ["expression", "intensity", "durationMs"],
@@ -85,7 +85,7 @@ describe("Qwen realtime tool contract", () => {
       response_id: "response-1",
       item_id: "item-1",
       call_id: "call-1",
-      name: "flowgo_show_expression",
+      name: "show_expression",
       delta: '{"expression":"happy",',
     });
     state.handleEvent({
@@ -99,13 +99,13 @@ describe("Qwen realtime tool contract", () => {
       response_id: "response-1",
       item_id: "item-1",
       call_id: "call-1",
-      name: "flowgo_show_expression",
+      name: "show_expression",
     });
 
     expect(onToolCall).toHaveBeenCalledWith({
       itemId: "item-1",
       callId: "call-1",
-      name: "flowgo_show_expression",
+      name: "show_expression",
       args: { expression: "happy", intensity: 0.8, durationMs: 1200 },
       responseId: "response-1",
     });
@@ -176,7 +176,7 @@ describe("Qwen realtime tool contract", () => {
         id: "stale-tool-item",
         type: "function_call",
         call_id: "stale-tool-call",
-        name: "flowgo_show_expression",
+        name: "show_expression",
         arguments: '{"expression":"happy"}',
       },
     });

@@ -83,11 +83,6 @@ import {
   resolveAgentIdFromSessionKey,
   toAgentStoreSessionKey,
 } from "../../routing/session-key.js";
-import {
-  authorizeFlowGoOwnedSession,
-  resolveFlowGoCaller,
-  resolveFlowGoNewSessionRoute,
-} from "../flowgo-device-routing.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
 import { resolveSessionKeyForRun } from "../server-session-key.js";
 import {
@@ -914,18 +909,13 @@ async function handleSessionSend(params: {
     });
   }
 }
-const rawSessionsHandlers: GatewayRequestHandlers = {
-  "sessions.list": async ({ params, respond, context, client }) => {
+export const sessionsHandlers: GatewayRequestHandlers = {
+  "sessions.list": async ({ params, respond, context }) => {
     if (!assertValidParams(params, validateSessionsListParams, "sessions.list", respond)) {
       return;
     }
     const p = params;
     const cfg = context.getRuntimeConfig();
-    const flowGoCaller = await resolveFlowGoCaller(client);
-    if (flowGoCaller.kind === "error") {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, flowGoCaller.message));
-      return;
-    }
     const configuredAgentsOnly = p.configuredAgentsOnly === true;
     const payload = await measureDiagnosticsTimelineSpan(
       "gateway.sessions.list",
@@ -948,14 +938,7 @@ const rawSessionsHandlers: GatewayRequestHandlers = {
         const configuredStore = configuredAgentsOnly
           ? filterSessionStoreToConfiguredAgents(cfg, store)
           : store;
-        const listStore =
-          flowGoCaller.kind === "flowgo"
-            ? Object.fromEntries(
-                Object.entries(configuredStore).filter(
-                  ([, entry]) => entry?.flowGoOwnerDeviceId === flowGoCaller.deviceId,
-                ),
-              )
-            : configuredStore;
+        const listStore = configuredStore;
         const modelCatalog = await measureDiagnosticsTimelineSpan(
           "gateway.sessions.list.model_catalog",
           () => loadOptionalServerMethodModelCatalog(context, "sessions.list"),
@@ -1348,25 +1331,9 @@ const rawSessionsHandlers: GatewayRequestHandlers = {
     }
     const p = params;
     const cfg = context.getRuntimeConfig();
-    let requestedKey = normalizeOptionalString(p.key);
+    const requestedKey = normalizeOptionalString(p.key);
     const requestedAgentId = normalizeOptionalString(p.agentId);
-    const flowGoRoute = await resolveFlowGoNewSessionRoute({
-      client,
-      cfg,
-      requestedAgentId,
-      requestedSessionKey: requestedKey,
-    });
-    if (flowGoRoute.kind === "error") {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, flowGoRoute.message));
-      return;
-    }
-    if (flowGoRoute.kind === "route") {
-      requestedKey = flowGoRoute.sessionKey;
-    }
-    const agentId = normalizeAgentId(
-      (flowGoRoute.kind === "route" ? flowGoRoute.agentId : requestedAgentId) ??
-        resolveDefaultAgentId(cfg),
-    );
+    const agentId = normalizeAgentId(requestedAgentId ?? resolveDefaultAgentId(cfg));
     if (requestedKey) {
       const requestedKeyAgentId = parseAgentSessionKey(requestedKey)?.agentId;
       if (
@@ -1521,27 +1488,6 @@ const rawSessionsHandlers: GatewayRequestHandlers = {
         storePath: target.storePath,
       },
       async ({ sessionEntries }) => {
-        const existingFlowGoEntry = sessionEntries[target.canonicalKey];
-        if (
-          flowGoRoute.kind === "route" &&
-          existingFlowGoEntry?.flowGoOwnerDeviceId &&
-          existingFlowGoEntry.flowGoOwnerDeviceId !== flowGoRoute.ownerDeviceId
-        ) {
-          return {
-            ok: false as const,
-            error: errorShape(
-              ErrorCodes.INVALID_REQUEST,
-              "FlowGo session belongs to a different device",
-            ),
-          };
-        }
-        if (
-          flowGoRoute.kind === "route" &&
-          existingFlowGoEntry?.sessionId &&
-          existingFlowGoEntry.flowGoOwnerDeviceId !== flowGoRoute.ownerDeviceId
-        ) {
-          delete sessionEntries[target.canonicalKey];
-        }
         const patched = await applySessionsPatchToStore({
           cfg,
           store: sessionEntries,
@@ -1557,7 +1503,7 @@ const rawSessionsHandlers: GatewayRequestHandlers = {
         if (!patched.ok) {
           return patched;
         }
-        if (!canonicalParentSessionKey && flowGoRoute.kind !== "route") {
+        if (!canonicalParentSessionKey) {
           return patched;
         }
         const inheritedSelection = normalizeOptionalString(p.model)
@@ -1566,9 +1512,6 @@ const rawSessionsHandlers: GatewayRequestHandlers = {
         const nextEntry: SessionEntry = {
           ...patched.entry,
           ...inheritedSelection,
-          ...(flowGoRoute.kind === "route"
-            ? { flowGoOwnerDeviceId: flowGoRoute.ownerDeviceId }
-            : {}),
           ...(canonicalParentSessionKey ? { parentSessionKey: canonicalParentSessionKey } : {}),
         };
         return {
@@ -2800,136 +2743,3 @@ const rawSessionsHandlers: GatewayRequestHandlers = {
     });
   },
 };
-
-const FLOWGO_MULTI_SESSION_METHODS = new Set([
-  "sessions.cleanup",
-  "sessions.resolve",
-  "sessions.reset",
-  "sessions.subscribe",
-  "sessions.unsubscribe",
-]);
-
-async function authorizeFlowGoSessionsRequest(
-  method: string,
-  opts: GatewayRequestHandlerOptions,
-): Promise<boolean> {
-  const caller = await resolveFlowGoCaller(opts.client);
-  if (caller.kind === "unchanged") {
-    return true;
-  }
-  if (caller.kind === "error") {
-    opts.respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, caller.message));
-    return false;
-  }
-  if (method === "sessions.list") {
-    return true;
-  }
-  if (method === "sessions.create") {
-    const parentSessionKey = normalizeOptionalString(
-      (opts.params as { parentSessionKey?: unknown }).parentSessionKey,
-    );
-    if (!parentSessionKey) {
-      return true;
-    }
-    const parentEntry = loadSessionEntry(parentSessionKey).entry;
-    const parentAccess = await authorizeFlowGoOwnedSession({
-      client: opts.client,
-      ownerDeviceId: parentEntry?.flowGoOwnerDeviceId,
-    });
-    if (parentAccess.kind === "allowed") {
-      return true;
-    }
-    opts.respond(
-      false,
-      undefined,
-      errorShape(
-        ErrorCodes.INVALID_REQUEST,
-        parentAccess.kind === "error"
-          ? parentAccess.message
-          : "FlowGo parent session access denied",
-      ),
-    );
-    return false;
-  }
-  if (FLOWGO_MULTI_SESSION_METHODS.has(method)) {
-    opts.respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, "FlowGo devices require an owned session selector"),
-    );
-    return false;
-  }
-
-  const params = opts.params as { key?: unknown; sessionKey?: unknown; agentId?: unknown };
-  const key = normalizeOptionalString(
-    typeof params.key === "string"
-      ? params.key
-      : typeof params.sessionKey === "string"
-        ? params.sessionKey
-        : undefined,
-  );
-  if (method === "sessions.preview") {
-    const keys = Array.isArray(opts.params.keys)
-      ? opts.params.keys.filter((value): value is string => typeof value === "string")
-      : [];
-    for (const previewKey of keys) {
-      const entry = loadSessionEntry(previewKey).entry;
-      const access = await authorizeFlowGoOwnedSession({
-        client: opts.client,
-        ownerDeviceId: entry?.flowGoOwnerDeviceId,
-      });
-      if (access.kind !== "allowed") {
-        opts.respond(
-          false,
-          undefined,
-          errorShape(
-            ErrorCodes.INVALID_REQUEST,
-            access.kind === "error" ? access.message : "FlowGo session access denied",
-          ),
-        );
-        return false;
-      }
-    }
-    return true;
-  }
-
-  if (!key) {
-    opts.respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, "FlowGo devices require an owned session selector"),
-    );
-    return false;
-  }
-  const entry = loadSessionEntry(key, {
-    agentId: normalizeOptionalString(params.agentId),
-  }).entry;
-  const access = await authorizeFlowGoOwnedSession({
-    client: opts.client,
-    ownerDeviceId: entry?.flowGoOwnerDeviceId,
-  });
-  if (access.kind === "allowed") {
-    return true;
-  }
-  opts.respond(
-    false,
-    undefined,
-    errorShape(
-      ErrorCodes.INVALID_REQUEST,
-      access.kind === "error" ? access.message : "FlowGo session access denied",
-    ),
-  );
-  return false;
-}
-
-export const sessionsHandlers: GatewayRequestHandlers = Object.fromEntries(
-  Object.entries(rawSessionsHandlers).map(([method, handler]) => [
-    method,
-    async (opts: GatewayRequestHandlerOptions) => {
-      if (!(await authorizeFlowGoSessionsRequest(method, opts))) {
-        return;
-      }
-      await handler(opts);
-    },
-  ]),
-);

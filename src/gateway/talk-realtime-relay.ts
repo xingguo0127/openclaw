@@ -15,7 +15,6 @@ import {
   type RealtimeVoiceAgentControlResult,
 } from "../talk/agent-run-control.js";
 import { readSpeakableRealtimeVoiceToolResult } from "../talk/consult-question.js";
-import { FLOWGO_EXPRESSION_TOOL_NAME } from "../talk/flowgo-expression-tool.js";
 import {
   createRealtimeVoiceForcedConsultCoordinator,
   type RealtimeVoiceForcedConsultCoordinator,
@@ -1171,10 +1170,7 @@ export function submitTalkRealtimeRelayToolResult(params: {
     session.bridge.submitToolResult(params.callId, params.result, { suppressResponse: true });
     return;
   }
-  const providerOptions: RealtimeVoiceToolResultOptions | undefined =
-    toolCall.name === FLOWGO_EXPRESSION_TOOL_NAME
-      ? { responseMode: "silent-side-effect" }
-      : params.options;
+  const providerOptions: RealtimeVoiceToolResultOptions | undefined = params.options;
   session.bridge.submitToolResult(params.callId, params.result, providerOptions);
   const turnId = toolCall.turnId;
   const final = params.options?.willContinue !== true;

@@ -154,7 +154,6 @@ import {
   CronUpdateParamsSchema,
 } from "./cron.js";
 import {
-  DeviceAgentBindParamsSchema,
   DevicePairApproveParamsSchema,
   DevicePairListParamsSchema,
   DevicePairRemoveParamsSchema,
@@ -574,7 +573,6 @@ export const ProtocolSchemas = {
   PluginsSessionActionSuccessResult: PluginsSessionActionSuccessResultSchema,
   PluginsUiDescriptorsParams: PluginsUiDescriptorsParamsSchema,
   PluginsUiDescriptorsResult: PluginsUiDescriptorsResultSchema,
-  DeviceAgentBindParams: DeviceAgentBindParamsSchema,
   DevicePairListParams: DevicePairListParamsSchema,
   DevicePairApproveParams: DevicePairApproveParamsSchema,
   DevicePairRejectParams: DevicePairRejectParamsSchema,
