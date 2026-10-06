@@ -497,7 +497,103 @@ describe("flowos task-center auth", () => {
     expect(pairingMocks.approve).not.toHaveBeenCalled();
   });
 
-  it("rejects onboarding requests for device types other than AgentTerminal", async () => {
+  it("provisions a MacClient with the same owner scopes as the phone and its own client profile", async () => {
+    const bytes = Buffer.alloc(32, 21);
+    const publicKey = bytes.toString("base64url");
+    const deviceId = createHash("sha256").update(bytes).digest("hex");
+    pairingMocks.get.mockResolvedValue(null);
+    pairingMocks.request.mockResolvedValue({ request: { requestId: "mac-1" } });
+    pairingMocks.approve.mockResolvedValue({ status: "approved", device: { deviceId } });
+    pairingMocks.ensure.mockResolvedValue({ token: "mac-device-token" });
+    const { calls } = setup();
+    const [, handler] = method(calls, "flowos.deviceOnboardingProvision");
+    const respond = vi.fn();
+    await invoke(handler, {
+      params: {
+        deviceId,
+        devicePublicKey: publicKey,
+        deviceType: "MacClient",
+        platform: "macOS 26.5.2",
+      },
+      client: pairedOperator(),
+      respond,
+    });
+    expect(respond).toHaveBeenCalledWith(true, {
+      deviceId,
+      devicePublicKey: publicKey,
+      deviceToken: "mac-device-token",
+    });
+    const scopes = ["operator.read", "operator.write", "operator.admin", "operator.pairing"];
+    expect(pairingMocks.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceId,
+        publicKey,
+        clientId: "openclaw-macos",
+        clientMode: "ui",
+        platform: "macOS 26.5.2",
+        deviceFamily: "Mac",
+        role: "operator",
+        scopes,
+      }),
+    );
+    expect(pairingMocks.request.mock.calls[0][0]).not.toHaveProperty("modelIdentifier");
+    expect(pairingMocks.ensure).toHaveBeenCalledWith({ deviceId, role: "operator", scopes });
+  });
+
+  it("rejects a MacClient request with a missing or malformed platform", async () => {
+    const bytes = Buffer.alloc(32, 22);
+    const publicKey = bytes.toString("base64url");
+    const deviceId = createHash("sha256").update(bytes).digest("hex");
+    const { calls } = setup();
+    const [, handler] = method(calls, "flowos.deviceOnboardingProvision");
+    for (const extra of [
+      {},
+      { platform: "linux" },
+      { platform: "macOS x.y" },
+      { platform: "macOS 26.5.2; rm" },
+    ]) {
+      const respond = vi.fn();
+      await invoke(handler, {
+        params: { deviceId, devicePublicKey: publicKey, deviceType: "MacClient", ...extra },
+        client: pairedOperator(),
+        respond,
+      });
+      expect(respond.mock.calls[0][0]).toBe(false);
+    }
+    expect(pairingMocks.request).not.toHaveBeenCalled();
+  });
+
+  it("re-issues the token for an already provisioned MacClient without a new pairing", async () => {
+    const bytes = Buffer.alloc(32, 23);
+    const publicKey = bytes.toString("base64url");
+    const deviceId = createHash("sha256").update(bytes).digest("hex");
+    pairingMocks.get.mockResolvedValue({
+      deviceId,
+      publicKey,
+      clientId: "openclaw-macos",
+      clientMode: "ui",
+      platform: "macOS 26.5.2",
+      deviceFamily: "Mac",
+    });
+    pairingMocks.ensure.mockResolvedValue({ token: "stable-mac-token" });
+    const { calls } = setup();
+    const [, handler] = method(calls, "flowos.deviceOnboardingProvision");
+    const respond = vi.fn();
+    await invoke(handler, {
+      params: {
+        deviceId,
+        devicePublicKey: publicKey,
+        deviceType: "MacClient",
+        platform: "macOS 26.5.2",
+      },
+      client: pairedOperator(),
+      respond,
+    });
+    expect(respond.mock.calls[0][1]).toMatchObject({ deviceId, deviceToken: "stable-mac-token" });
+    expect(pairingMocks.request).not.toHaveBeenCalled();
+  });
+
+  it("rejects onboarding requests for unsupported device types", async () => {
     const bytes = Buffer.alloc(32, 11);
     const publicKey = bytes.toString("base64url");
     const deviceId = createHash("sha256").update(bytes).digest("hex");
