@@ -111,28 +111,7 @@ export type PairedDevice = {
   approvedAtMs: number;
   lastSeenAtMs?: number;
   lastSeenReason?: string;
-  boundAgentId?: string;
-  bindingRevision?: number;
 };
-
-export type FlowGoDeviceProjection = {
-  deviceType: "pet";
-  deviceModel: "flowgo";
-};
-
-export type BindFlowGoDeviceAgentResult =
-  | {
-      ok: true;
-      deviceId: string;
-      previousBoundAgentId?: string;
-      boundAgentId: string;
-      bindingRevision: number;
-    }
-  | {
-      ok: false;
-      reason: "unknown-device" | "not-flowgo" | "revision-conflict";
-      bindingRevision?: number;
-    };
 
 /** Metadata fields a device may refresh without changing approval or token state. */
 export type PairedDeviceMetadataPatch = Pick<
@@ -243,31 +222,6 @@ async function persistState(
 
 function normalizeDeviceId(deviceId: string) {
   return deviceId.trim();
-}
-
-function normalizeBindingRevision(value: unknown): number {
-  return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0;
-}
-
-function normalizeIdentityValue(value: string | undefined): string {
-  return value?.trim().toLowerCase() ?? "";
-}
-
-export function projectFlowGoDevice(
-  device: Pick<
-    PairedDevice,
-    "clientId" | "clientMode" | "platform" | "deviceFamily" | "modelIdentifier" | "role" | "roles"
-  >,
-): FlowGoDeviceProjection | null {
-  const roles = mergeRoles(device.roles, device.role) ?? [];
-  const isFlowGoIdentity =
-    normalizeIdentityValue(device.clientId) === "openclaw-pet" &&
-    normalizeIdentityValue(device.clientMode) === "ui" &&
-    normalizeIdentityValue(device.platform) === "linux" &&
-    normalizeIdentityValue(device.deviceFamily) === "raspberrypi" &&
-    normalizeIdentityValue(device.modelIdentifier) === "flowgo" &&
-    roles.includes(OPERATOR_ROLE);
-  return isFlowGoIdentity ? { deviceType: "pet", deviceModel: "flowgo" } : null;
 }
 
 function normalizeRole(role: string | undefined): string | null {
@@ -549,8 +503,6 @@ function buildApprovedPairedDevice(params: {
     approvedAtMs: params.now,
     lastSeenAtMs: params.accessMetadata?.lastSeenAtMs ?? params.existing?.lastSeenAtMs,
     lastSeenReason: params.accessMetadata?.lastSeenReason ?? params.existing?.lastSeenReason,
-    boundAgentId: params.existing?.boundAgentId,
-    bindingRevision: params.existing?.bindingRevision,
   };
 }
 
@@ -1049,45 +1001,6 @@ export async function removePairedDeviceRole(params: {
     state.pairedByDeviceId[normalizedDeviceId] = next;
     await persistState(state, params.baseDir, "both");
     return { deviceId: normalizedDeviceId, role, removedDevice: false };
-  });
-}
-
-export async function bindFlowGoDeviceAgent(params: {
-  deviceId: string;
-  agentId: string;
-  expectedRevision: number;
-  baseDir?: string;
-}): Promise<BindFlowGoDeviceAgentResult> {
-  return await withLock(async () => {
-    const state = await loadState(params.baseDir);
-    const deviceId = normalizeDeviceId(params.deviceId);
-    const device = state.pairedByDeviceId[deviceId];
-    if (!device) {
-      return { ok: false, reason: "unknown-device" };
-    }
-    if (!projectFlowGoDevice(device)) {
-      return { ok: false, reason: "not-flowgo" };
-    }
-    const bindingRevision = normalizeBindingRevision(device.bindingRevision);
-    if (params.expectedRevision !== bindingRevision) {
-      return { ok: false, reason: "revision-conflict", bindingRevision };
-    }
-    const previousBoundAgentId = normalizeRole(device.boundAgentId) ?? undefined;
-    const boundAgentId = params.agentId.trim();
-    const nextRevision = bindingRevision + 1;
-    state.pairedByDeviceId[deviceId] = {
-      ...device,
-      boundAgentId,
-      bindingRevision: nextRevision,
-    };
-    await persistState(state, params.baseDir, "paired");
-    return {
-      ok: true,
-      deviceId,
-      previousBoundAgentId,
-      boundAgentId,
-      bindingRevision: nextRevision,
-    };
   });
 }
 

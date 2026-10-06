@@ -1,0 +1,12 @@
+{
+  "id": "flowos-screen-context",
+  "activation": {
+    "onStartup": false,
+    "onConfigPaths": ["plugins.entries.flowos-screen-context"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

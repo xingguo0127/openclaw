@@ -327,7 +327,6 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
       "device.pair.approve",
       "device.pair.reject",
       "device.pair.remove",
-      "device.agent.bind",
       "device.token.rotate",
       "device.token.revoke",
     ],
@@ -341,7 +340,6 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
     methods: [
       "doctor.memory.status",
       "doctor.memory.dreamDiary",
-      "doctor.memory.knowledgeGraph",
       "doctor.memory.backfillDreamDiary",
       "doctor.memory.resetDreamDiary",
       "doctor.memory.resetGroundedShortTerm",

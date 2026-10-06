@@ -450,13 +450,10 @@ enumeration of `src/gateway/server-methods/*.ts`.
   </Accordion>
 
   <Accordion title="Device pairing and device tokens">
-    - `device.pair.list` returns pending and approved paired devices. Approved FlowGo identities add the read-only projection `deviceType="pet"`, `deviceModel="flowgo"`, optional `boundAgentId` / `effectiveAgentId`, `agentAvailability`, and monotonic `bindingRevision`; historical records without these fields remain valid and read as revision `0`.
+    - `device.pair.list` returns pending and approved paired devices.
     - `device.pair.approve`, `device.pair.reject`, and `device.pair.remove` manage device-pairing records.
-    - `device.agent.bind` atomically changes a FlowGo device's Agent. It requires `operator.admin` authority and `{ deviceId, agentId, expectedRevision }`; a stale revision, unknown/non-FlowGo device, or unknown Agent is rejected without writing. Deleted Agents remain visible as unavailable until an administrator rebinds or removes the device.
     - `device.token.rotate` rotates a paired device token within its approved role and caller scope bounds.
     - `device.token.revoke` revokes a paired device token within its approved role and caller scope bounds.
-
-    FlowGo chat/session creation is namespaced by the verified paired `deviceId` and current binding. A new session is routed only to the bound Agent, while a canonical server-issued FlowGo session key may continue an existing pre-rebind conversation on its original Agent. Client-selected Agent keys, other-device session keys, and unavailable bindings fail closed.
 
   </Accordion>
 

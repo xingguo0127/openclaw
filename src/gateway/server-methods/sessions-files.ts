@@ -16,7 +16,6 @@ import {
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { root as fsSafeRoot, FsSafeError, type ReadResult } from "../../infra/fs-safe.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
-import { authorizeFlowGoOwnedSession } from "../flowgo-device-routing.js";
 import { visitSessionMessagesAsync } from "../session-transcript-readers.js";
 import { loadSessionEntry } from "../session-utils.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
@@ -708,32 +707,12 @@ function respondSessionFileTooLarge(respond: RespondFn, file: SessionFileEntry, 
   );
 }
 
-async function authorizeSessionFilesAccess(params: {
-  client: Parameters<GatewayRequestHandlers[string]>[0]["client"];
-  respond: RespondFn;
-  sessionKey: string;
-}): Promise<boolean> {
-  const entry = loadSessionEntry(params.sessionKey).entry;
-  const access = await authorizeFlowGoOwnedSession({
-    client: params.client,
-    ownerDeviceId: entry?.flowGoOwnerDeviceId,
-  });
-  if (access.kind !== "error") {
-    return true;
-  }
-  params.respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, access.message));
-  return false;
-}
-
 /** Gateway handlers for files referenced by session transcripts. */
 export const sessionsFilesHandlers: GatewayRequestHandlers = {
-  "sessions.files.list": async ({ params, respond, client }) => {
+  "sessions.files.list": async ({ params, respond }) => {
     if (
       !assertValidParams(params, validateSessionsFilesListParams, "sessions.files.list", respond)
     ) {
-      return;
-    }
-    if (!(await authorizeSessionFilesAccess({ client, respond, sessionKey: params.sessionKey }))) {
       return;
     }
     const result = await buildListResult(params);
@@ -742,11 +721,8 @@ export const sessionsFilesHandlers: GatewayRequestHandlers = {
       ...result,
     });
   },
-  "sessions.files.get": async ({ params, respond, client }) => {
+  "sessions.files.get": async ({ params, respond }) => {
     if (!assertValidParams(params, validateSessionsFilesGetParams, "sessions.files.get", respond)) {
-      return;
-    }
-    if (!(await authorizeSessionFilesAccess({ client, respond, sessionKey: params.sessionKey }))) {
       return;
     }
     const result = await findSessionFile(params);

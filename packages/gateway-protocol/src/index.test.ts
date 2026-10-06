@@ -434,7 +434,7 @@ describe("validateTalkSession", () => {
         mode: "realtime",
         transport: "managed-room",
         brain: "agent-consult",
-        clientCapabilities: ["flowgo.expression.v1"],
+        clientCapabilities: ["example.capability.v1"],
       }),
     ).toBe(true);
     expect(
@@ -474,10 +474,10 @@ describe("validateTalkSession", () => {
   it("rejects duplicate or malformed Talk session client capabilities", () => {
     expect(
       validateTalkSessionCreateParams({
-        clientCapabilities: ["flowgo.expression.v1", "flowgo.expression.v1"],
+        clientCapabilities: ["example.capability.v1", "example.capability.v1"],
       }),
     ).toBe(false);
-    expect(validateTalkSessionCreateParams({ clientCapabilities: ["FlowGo Expression"] })).toBe(
+    expect(validateTalkSessionCreateParams({ clientCapabilities: ["Example Capability"] })).toBe(
       false,
     );
     expect(
@@ -486,7 +486,7 @@ describe("validateTalkSession", () => {
         mode: "realtime",
         transport: "gateway-relay",
         brain: "agent-consult",
-        negotiatedCapabilities: ["flowgo.expression.v1"],
+        negotiatedCapabilities: ["example.capability.v1"],
       }),
     ).toBe(true);
     expect(
@@ -495,7 +495,7 @@ describe("validateTalkSession", () => {
         mode: "realtime",
         transport: "gateway-relay",
         brain: "agent-consult",
-        negotiatedCapabilities: ["FlowGo Expression"],
+        negotiatedCapabilities: ["Example Capability"],
       }),
     ).toBe(false);
   });

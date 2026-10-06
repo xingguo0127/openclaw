@@ -33,7 +33,6 @@ export type HeartbeatWakeSource =
   | "manual"
   | "exec-event"
   | "notifications-event"
-  | "collab-event"
   | "cron"
   | "hook"
   | "background-task"

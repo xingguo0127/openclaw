@@ -19,8 +19,6 @@ import {
 import { REALTIME_VOICE_AGENT_CONTROL_TOOL } from "../../talk/agent-run-control-shared.js";
 import { controlRealtimeVoiceAgentRun } from "../../talk/agent-run-control.js";
 import { resolveConfiguredRealtimeVoiceProvider } from "../../talk/provider-resolver.js";
-import { resolveFlowGoNewSessionRoute } from "../flowgo-device-routing.js";
-import { loadSessionEntry } from "../session-utils.js";
 import { startTalkRealtimeAgentConsult } from "../talk-agent-consult.js";
 import { resolveTalkRealtimeRelaySessionKey } from "../talk-realtime-relay.js";
 import { formatForLog } from "../ws-log.js";
@@ -201,21 +199,6 @@ export const talkClientHandlers: GatewayRequestHandlers = {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, formatForLog(err)));
         return;
       }
-    } else {
-      const existingEntry = loadSessionEntry(sessionKey).entry;
-      const route = await resolveFlowGoNewSessionRoute({
-        client: request.client,
-        cfg: request.context.getRuntimeConfig(),
-        existingSessionOwnerDeviceId: existingEntry?.flowGoOwnerDeviceId,
-        requestedSessionKey: sessionKey,
-      });
-      if (route.kind === "error") {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, route.message));
-        return;
-      }
-      if (route.kind === "route" && route.sessionKey) {
-        sessionKey = route.sessionKey;
-      }
     }
 
     const result = await startTalkRealtimeAgentConsult({
@@ -254,23 +237,7 @@ export const talkClientHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    let sessionKey = params.sessionKey;
-    if (client?.connect?.device?.id && typeof context.getRuntimeConfig === "function") {
-      const existingEntry = loadSessionEntry(sessionKey).entry;
-      const route = await resolveFlowGoNewSessionRoute({
-        client,
-        cfg: context.getRuntimeConfig(),
-        existingSessionOwnerDeviceId: existingEntry?.flowGoOwnerDeviceId,
-        requestedSessionKey: sessionKey,
-      });
-      if (route.kind === "error") {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, route.message));
-        return;
-      }
-      if (route.kind === "route" && route.sessionKey) {
-        sessionKey = route.sessionKey;
-      }
-    }
+    const sessionKey = params.sessionKey;
     if (
       !hasOwnedActiveTalkClientRun({
         context,
