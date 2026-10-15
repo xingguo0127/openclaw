@@ -1,18 +1,20 @@
-name: floai · openclaw 多架构镜像
+name: floai · openclaw 镜像（amd64）
 
-# 手动触发：把 fork 当前分支（默认 floai）build 成 amd64+arm64 多架构镜像推 GHCR。
-# 各架构用原生 runner 分别 build（避开 QEMU 慢），最后合并成一个 manifest list。
+# 手动触发：把 fork 当前分支（默认 floai）build 成 linux/amd64 镜像推 GHCR + JCR。
+# 目前只服务 Linux 服务器（prod box），不出 arm64（Mac 设计师环境暂无需求）。
+# 需要 arm64 时：往 build.strategy.matrix 加回 linux/arm64 + ubuntu-24.04-arm，
+# 并在末尾 JCR 步骤补推 :<tag>-arm64（见 git 历史）。
 # 触发：Actions 页面点 Run，或 `gh workflow run floai-image.yml -f tag=floai`
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "镜像 tag（推到 ghcr.io/xingguo0127/openclaw:<tag>）"
+        description: "镜像 tag（推到 ghcr.io/xingguo0127/openclaw:<tag>；不能含 /，如 floai-20261015）"
         required: true
         default: floai
 
 jobs:
-  # ── 每个架构在各自原生 runner 上 build，按 digest 推（不带 tag）──
+  # ── build 并按 digest 推（不带 tag），merge 阶段再打 tag ──
   build:
     strategy:
       fail-fast: false
@@ -21,9 +23,6 @@ jobs:
           - platform: linux/amd64
             runner: ubuntu-latest
             arch: amd64
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm # public 仓免费 arm64 原生 runner
-            arch: arm64
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -103,7 +102,10 @@ jobs:
                 kill "$chromium_pid" 2>/dev/null || true
                 wait "$chromium_pid" 2>/dev/null || true
               fi
-              rm -rf "$profile"
+              # kill 后 Chromium 子进程可能仍在写 profile，rm 偶发 "Directory not empty"；
+              # 清理失败不能顶掉校验本身的退出码（trap 末条命令的状态会成为脚本退出码）。
+              sleep 0.5
+              rm -rf "$profile" 2>/dev/null || true
             }
             trap cleanup EXIT INT TERM
 
@@ -182,19 +184,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: 合并成多架构 manifest
+      - name: 校验 tag 合法
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          [[ "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "::error::非法镜像 tag「$TAG」（不能含 /，例：floai-20261015）"; exit 1; }
+
+      - name: 打 tag（amd64）
         working-directory: /tmp/digests
         run: |
           TAG="${{ github.event.inputs.tag }}"
           docker buildx imagetools create -t "${IMAGE}:${TAG}" \
             $(for f in *; do echo "${IMAGE}@$(cat "$f")"; done)
 
-      - name: 校验（应列出 linux/amd64 + linux/arm64）
+      - name: 校验（应列出 linux/amd64）
         run: docker buildx imagetools inspect "${IMAGE}:${{ github.event.inputs.tag }}"
 
-      # ── 京东云 JCR：推两个单架构 tag（jfe 网关不收多架构 manifest list，PUT 直接 500/502）──
-      #    :<tag>        = amd64 → prod box 内网拉
-      #    :<tag>-arm64  = arm64 → 设计师 Apple Silicon 原生拉（dev compose 按 uname -m 选）
+      # ── 京东云 JCR：推单架构 tag（jfe 网关不收多架构 manifest list，PUT 直接 500/502）──
+      #    :<tag> = amd64 → prod box 内网拉
       - name: 登录 JCR（京东云）
         if: env.JCR_REGISTRY != ''
         uses: docker/login-action@v3
@@ -203,9 +209,9 @@ jobs:
           username: ${{ secrets.JCR_USER }}
           password: ${{ secrets.JCR_PASS }}
 
-      # 按 digest 拉单架构 manifest 重推（不跑镜像，故 arm64 在 amd64 runner 上也无需 QEMU）。
+      # 按 digest 拉单架构 manifest 重推。
       # 不合 manifest list：实测 JCR 对 Docker list(500) 与 OCI index(502) 的 PUT 都被网关拒。
-      - name: 推单架构 amd64 + arm64 → JCR
+      - name: 推 amd64 → JCR
         if: env.JCR_REGISTRY != ''
         working-directory: /tmp/digests
         run: |
@@ -224,10 +230,7 @@ jobs:
             done
             return 1
           }
-          AMD64_DIGEST="$(cat amd64)"
-          ARM64_DIGEST="$(cat arm64)"
-          push "$AMD64_DIGEST" "${TAG}"
-          push "$ARM64_DIGEST" "${TAG}-arm64"
+          push "$(cat amd64)" "${TAG}"
           # JCR会把GHCR的OCI manifest重新序列化，跨Registry的manifest digest不会保持一致。
           # docker push成功已证明目标Registry接受镜像；不要把manifest字节级等值当作内容等价。
-          echo "✓ JCR: ${JCR_IMG}:${TAG}(amd64) + ${JCR_IMG}:${TAG}-arm64(arm64)"
+          echo "✓ JCR: ${JCR_IMG}:${TAG}(amd64)"
