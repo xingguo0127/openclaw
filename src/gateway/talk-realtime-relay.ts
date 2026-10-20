@@ -3,7 +3,15 @@
 import { randomUUID } from "node:crypto";
 import { resolveExpiresAtMsFromDurationMs } from "@openclaw/normalization-core/number-coercion";
 import type { OpenClawConfig } from "../config/types.js";
+import { onAgentEvent } from "../infra/agent-events.js";
 import type { RealtimeVoiceProviderPlugin } from "../plugins/types.js";
+import {
+  appendRealtimeVoicePresentation,
+  formatRealtimeVoiceConsultResultForSpeech,
+  readRealtimeVoicePresentationFromAgentEvent,
+  withRealtimeVoicePresentations,
+  type RealtimeVoicePresentation,
+} from "../talk/agent-consult-presentations.js";
 import {
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
   buildRealtimeVoiceAgentConsultWorkingResponse,
@@ -68,13 +76,88 @@ const MAX_RELAY_SESSIONS_GLOBAL = 64;
 const RELAY_EVENT = "talk.event";
 const RELAY_TRANSCRIPT_ECHO_LOOKBACK_MS = 12_000;
 const FORCED_CONSULT_FALLBACK_DELAY_MS = 200;
-const FORCED_CONSULT_RESULT_MAX_CHARS = 1_800;
+const FORCED_CONSULT_RESULT_MAX_CHARS = 12_000;
+const REALTIME_PRESENTATION_RETENTION_MS = 5 * 60 * 1000;
 const MAX_CANCELLED_RELAY_TOOL_CALLS = 128;
 const MAX_RELAY_RESPONSE_CORRELATIONS = 128;
 const EXECUTION_ANNOUNCEMENT_TTL_MS = 120_000;
 const MAX_EXECUTION_ANNOUNCEMENT_HISTORY = 256;
 const REALTIME_AGENT_CONSULT_ACKNOWLEDGEMENT_MAX_CHARS = 400;
 const REALTIME_OUTPUT_PLAYBACK_IDLE_GRACE_MS = 500;
+
+type PendingRealtimePresentations = {
+  presentations: RealtimeVoicePresentation[];
+  expiresAt: number;
+};
+
+const pendingRealtimePresentations = new Map<string, PendingRealtimePresentations>();
+let realtimePresentationListenerReady = false;
+
+function prunePendingRealtimePresentations(now = Date.now()): void {
+  for (const [runId, pending] of pendingRealtimePresentations) {
+    if (pending.expiresAt <= now) {
+      pendingRealtimePresentations.delete(runId);
+    }
+  }
+}
+
+function ensureRealtimePresentationListener(): void {
+  if (realtimePresentationListenerReady) {
+    return;
+  }
+  realtimePresentationListenerReady = true;
+  onAgentEvent((event) => {
+    const pending = pendingRealtimePresentations.get(event.runId);
+    if (!pending) {
+      return;
+    }
+    appendRealtimeVoicePresentation(
+      pending.presentations,
+      readRealtimeVoicePresentationFromAgentEvent(event),
+    );
+    if (
+      event.stream === "lifecycle" &&
+      (event.data.phase === "end" || event.data.phase === "error")
+    ) {
+      pending.expiresAt = Date.now() + REALTIME_PRESENTATION_RETENTION_MS;
+    }
+  });
+}
+
+/** Starts collecting structured card data before a realtime chat run can emit tool events. */
+export function prepareTalkRealtimeRelayAgentRun(runId: string): void {
+  prunePendingRealtimePresentations();
+  ensureRealtimePresentationListener();
+  pendingRealtimePresentations.set(runId, {
+    presentations: [],
+    expiresAt: Date.now() + REALTIME_PRESENTATION_RETENTION_MS,
+  });
+}
+
+/** Drops presentation state when a realtime chat run failed to start. */
+export function releaseTalkRealtimeRelayAgentRun(runId: string): void {
+  pendingRealtimePresentations.delete(runId);
+}
+
+function promoteTalkRealtimeRelayAgentRun(preparedRunId: string, runId: string): void {
+  if (preparedRunId === runId) {
+    return;
+  }
+  const pending = pendingRealtimePresentations.get(preparedRunId);
+  if (!pending) {
+    return;
+  }
+  pendingRealtimePresentations.delete(preparedRunId);
+  pendingRealtimePresentations.set(runId, pending);
+}
+
+function attachTalkRealtimeRelayPresentations(runId: string | undefined, result: unknown): unknown {
+  if (!runId) {
+    return result;
+  }
+  const presentations = pendingRealtimePresentations.get(runId)?.presentations ?? [];
+  return withRealtimeVoicePresentations(result, presentations);
+}
 
 type TalkRealtimeRelayEventPayload =
   | { relaySessionId: string; type: "ready" }
@@ -431,13 +514,18 @@ function buildForcedConsultCheckingPrompt(): string {
   ].join(" ");
 }
 
-function buildForcedConsultSpeechPrompt(text: string): string {
+function buildForcedConsultSpeechPrompt(result: unknown): string {
+  const context = formatRealtimeVoiceConsultResultForSpeech(
+    result,
+    FORCED_CONSULT_RESULT_MAX_CHARS,
+  );
   return [
-    "OpenClaw produced the answer below. Read it back to the user faithfully and in full.",
-    "Keep every number, count, name, and list item EXACTLY as written — do NOT summarize, shorten, round, drop items, or change any count.",
-    "Do not invent or omit anything, and do not answer from your own memory. Do not mention tools, JSON, or internal routing. Speak only the answer itself.",
+    "OpenClaw produced agent commentary plus optional verified card data below.",
+    "Combine both into a natural spoken answer. Use the card data as the factual query result and the commentary as recommendations or context.",
+    "State the concrete names, times, prices, statuses, and representative options needed to answer the caller. Do not merely tell them to look at a card.",
+    "Do not read JSON keys, URLs, internal IDs, tools, or routing. Do not invent facts. Speak only the answer itself.",
     "",
-    text,
+    context,
   ].join("\n");
 }
 
@@ -1357,17 +1445,19 @@ export function submitTalkRealtimeRelayToolResult(params: {
   options?: RealtimeVoiceToolResultOptions;
 }): void {
   const session = getRelaySession(params.relaySessionId, params.connId);
+  const registeredAgentRunId = session.activeAgentToolCalls.get(params.callId);
+  const providerResult = attachTalkRealtimeRelayPresentations(registeredAgentRunId, params.result);
   const cancelledToolCall = session.cancelledToolCalls.get(params.callId);
   if (cancelledToolCall) {
     const final = params.options?.willContinue !== true;
     if (final) {
       session.cancelledToolCalls.delete(params.callId);
     }
-    session.bridge.submitToolResult(params.callId, params.result, { suppressResponse: true });
+    session.bridge.submitToolResult(params.callId, providerResult, { suppressResponse: true });
     broadcastToolResultToOwner(session, {
       callId: params.callId,
       turnId: cancelledToolCall.turnId,
-      result: params.result,
+      result: providerResult,
       final,
     });
     return;
@@ -1385,37 +1475,36 @@ export function submitTalkRealtimeRelayToolResult(params: {
       if (params.options?.willContinue !== true) {
         session.forcedConsults.markCancelled(forcedConsult);
       }
-    } else if (isWorkingToolResult(params.result)) {
+    } else if (isWorkingToolResult(providerResult)) {
       session.bridge.sendUserMessage(buildForcedConsultCheckingPrompt());
     } else {
       session.forcedConsults.markDelivered(forcedConsult);
-      const text = readSpeakableRealtimeVoiceToolResult(params.result, {
+      const text = readSpeakableRealtimeVoiceToolResult(providerResult, {
         maxChars: FORCED_CONSULT_RESULT_MAX_CHARS,
       });
       for (const nativeCallId of session.forcedConsults.nativeCallIds(forcedConsult)) {
         submitAlreadyDeliveredToolResult(session, nativeCallId, turnId);
       }
       if (text) {
-        session.bridge.sendUserMessage(buildForcedConsultSpeechPrompt(text));
+        session.bridge.sendUserMessage(buildForcedConsultSpeechPrompt(providerResult));
       }
     }
     const final = params.options?.willContinue !== true;
-    if (final && !cancelled && !isWorkingToolResult(params.result)) {
+    if (final && !cancelled && !isWorkingToolResult(providerResult)) {
       session.forcedConsults.markDelivered(forcedConsult);
     }
     broadcastToolResultToOwner(session, {
       callId: params.callId,
       turnId,
-      result: params.result,
+      result: providerResult,
       forced: true,
       final,
     });
     return;
   }
   const toolCall = session.toolCalls.get(params.callId);
-  const registeredAgentRunId = session.activeAgentToolCalls.get(params.callId);
   if (!toolCall && registeredAgentRunId) {
-    session.bridge.submitToolResult(params.callId, params.result, params.options);
+    session.bridge.submitToolResult(params.callId, providerResult, params.options);
     const turnId = ensureRelayTurn(session);
     const final = params.options?.willContinue !== true;
     if (final) {
@@ -1425,17 +1514,17 @@ export function submitTalkRealtimeRelayToolResult(params: {
     broadcastToolResultToOwner(session, {
       callId: params.callId,
       turnId,
-      result: params.result,
+      result: providerResult,
       final,
     });
     return;
   }
   if (!toolCall) {
-    session.bridge.submitToolResult(params.callId, params.result, { suppressResponse: true });
+    session.bridge.submitToolResult(params.callId, providerResult, { suppressResponse: true });
     return;
   }
   const providerOptions: RealtimeVoiceToolResultOptions | undefined = params.options;
-  session.bridge.submitToolResult(params.callId, params.result, providerOptions);
+  session.bridge.submitToolResult(params.callId, providerResult, providerOptions);
   const turnId = toolCall.turnId;
   const final = params.options?.willContinue !== true;
   if (final) {
@@ -1450,7 +1539,7 @@ export function submitTalkRealtimeRelayToolResult(params: {
   broadcastToolResultToOwner(session, {
     callId: params.callId,
     turnId,
-    result: params.result,
+    result: providerResult,
     final,
   });
 }
@@ -1462,8 +1551,12 @@ export function registerTalkRealtimeRelayAgentRun(params: {
   sessionKey: string;
   runId: string;
   callId?: string;
+  preparedRunId?: string;
 }): void {
   const session = getRelaySession(params.relaySessionId, params.connId);
+  if (params.preparedRunId) {
+    promoteTalkRealtimeRelayAgentRun(params.preparedRunId, params.runId);
+  }
   session.activeAgentRuns.set(params.runId, params.sessionKey);
   if (params.callId?.trim()) {
     session.activeAgentToolCalls.set(params.callId.trim(), params.runId);

@@ -42,7 +42,7 @@ export const REALTIME_VOICE_AGENT_CONSULT_TOOL: RealtimeVoiceTool = {
     "Before emitting this function call, you MUST first speak one brief, natural acknowledgement to the caller in the same response. Generate that acknowledgement from the caller's actual request and conversation context: state the concrete action you are starting and its subject, in the caller's language, and ask them to wait only when appropriate. Do not use a canned or fixed acknowledgement. " +
     "Do not emit this function call until that brief spoken acknowledgement has been produced. " +
     "Do not claim that the request is running in the background or has completed, because only the OpenClaw agent can determine that. " +
-    "After the tool result arrives, speak the actual result directly without repeating the waiting message. " +
+    "After the tool result arrives, combine its text commentary with any presentations card data and speak the actual result directly without repeating the waiting message. Treat presentations as verified query results: include the concrete user-relevant names, times, prices, statuses, or options needed to answer the request, while using text as the agent's recommendation or summary. Never read JSON keys, URLs, internal IDs, or say only that the details are in a card. " +
     "You MUST call this (do NOT answer yourself) for: " +
     "(1) querying tasks, spaces, plans, or any existing artifact's details; " +
     "(2) making a plan, generating a route book / document / itinerary, or creating a space; " +
@@ -157,7 +157,7 @@ export function buildRealtimeVoiceAgentConsultPolicyInstructions(config: {
       "Consult behavior:",
       "- Call openclaw_agent_consult before every substantive answer.",
       "- You may answer directly only for greetings, acknowledgements, brief latency tests, or filler while waiting for the consult result.",
-      "- After the consult result arrives, speak that result concisely.",
+      "- After the consult result arrives, combine its text commentary with any verified presentations data and speak the concrete result concisely; do not merely refer the caller to a card.",
     ].join("\n");
   }
   return [

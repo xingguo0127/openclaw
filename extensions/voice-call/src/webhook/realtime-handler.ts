@@ -14,6 +14,7 @@ import {
   createTalkSessionController,
   createRealtimeVoiceBridgeSession,
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
+  formatRealtimeVoiceConsultResultForSpeech,
   readRealtimeVoiceConsultQuestion,
   readSpeakableRealtimeVoiceToolResult,
   recordTalkObservabilityEvent,
@@ -55,7 +56,7 @@ const MAX_REALTIME_MESSAGE_BYTES = 256 * 1024;
 const MAX_REALTIME_WS_BUFFERED_BYTES = 1024 * 1024;
 const FORCED_CONSULT_FALLBACK_DELAY_MS = 200;
 const FORCED_CONSULT_NATIVE_DEDUPE_MS = 2_000;
-const FORCED_CONSULT_RESULT_MAX_CHARS = 1800;
+const FORCED_CONSULT_RESULT_MAX_CHARS = 12_000;
 const FORCED_CONSULT_REASON = "provider_final_transcript_without_openclaw_agent_consult";
 const CONSULT_TRANSCRIPT_SETTLE_MS = 350;
 const CONSULT_TRANSCRIPT_SETTLE_MAX_MS = 1_000;
@@ -198,17 +199,18 @@ function withFallbackConsultQuestion(args: unknown, fallback: string | undefined
     : { question };
 }
 
-function buildForcedConsultSpeechPrompt(result: string): string {
-  const trimmed = result.trim();
-  const bounded =
-    trimmed.length <= FORCED_CONSULT_RESULT_MAX_CHARS
-      ? trimmed
-      : `${trimmed.slice(0, FORCED_CONSULT_RESULT_MAX_CHARS - 16).trimEnd()} [truncated]`;
+function buildForcedConsultSpeechPrompt(result: unknown): string {
+  const context = formatRealtimeVoiceConsultResultForSpeech(
+    result,
+    FORCED_CONSULT_RESULT_MAX_CHARS,
+  );
   return [
     "Internal OpenClaw consult result is ready.",
     "Do not call tools for this internal result.",
-    "Speak the following answer to the caller now, briefly and naturally:",
-    bounded,
+    "Combine the agent commentary with any verified card data into a natural spoken answer.",
+    "State the concrete user-relevant names, times, prices, statuses, and representative options. Do not merely refer the caller to a card.",
+    "Do not read JSON keys, URLs, internal IDs, tools, or routing, and do not invent facts. Speak only the answer itself:",
+    context,
   ].join("\n");
 }
 
@@ -1126,7 +1128,7 @@ export class RealtimeCallHandler {
       }
       if (state.sendSpeechPrompt) {
         params.clearAudio();
-        params.session.sendUserMessage(buildForcedConsultSpeechPrompt(text));
+        params.session.sendUserMessage(buildForcedConsultSpeechPrompt(result));
       }
       console.log(
         `[voice-call] realtime forced agent consult completed callId=${params.callId} providerCallId=${params.callSid} elapsedMs=${Date.now() - startedAt}`,

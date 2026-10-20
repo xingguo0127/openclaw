@@ -17,6 +17,11 @@ import {
   type DeliveryContext,
 } from "../utils/delivery-context.shared.js";
 import {
+  appendRealtimeVoicePresentation,
+  readRealtimeVoicePresentationFromAgentEvent,
+  type RealtimeVoicePresentation,
+} from "./agent-consult-presentations.js";
+import {
   buildRealtimeVoiceAgentConsultPrompt,
   collectRealtimeVoiceAgentConsultVisibleText,
   type RealtimeVoiceAgentConsultTranscriptEntry,
@@ -30,7 +35,10 @@ export type RealtimeVoiceAgentConsultRuntime = PluginRuntimeCore["agent"];
 /**
  * Speakable text returned to the realtime voice bridge after an agent consult.
  */
-export type RealtimeVoiceAgentConsultResult = { text: string };
+export type RealtimeVoiceAgentConsultResult = {
+  text: string;
+  presentations?: RealtimeVoicePresentation[];
+};
 
 /**
  * Controls whether voice consults run in a fresh session or fork context from the requester.
@@ -276,6 +284,7 @@ export async function consultRealtimeVoiceAgent(params: {
   });
   // Voice consults suppress verbose/reasoning output because the bridge needs a short,
   // speakable answer, not agent-run diagnostics or hidden reasoning artifacts.
+  const presentations: RealtimeVoicePresentation[] = [];
   const result = await params.agentRuntime.runEmbeddedAgent({
     sessionId,
     sessionKey: params.sessionKey,
@@ -316,6 +325,12 @@ export async function consultRealtimeVoiceAgent(params: {
     extraSystemPrompt:
       params.extraSystemPrompt ??
       "You are the configured OpenClaw agent receiving delegated requests from a live voice bridge. Act on behalf of the user, use available tools when appropriate, and return a brief speakable result.",
+    onAgentEvent: (event) => {
+      appendRealtimeVoicePresentation(
+        presentations,
+        readRealtimeVoicePresentationFromAgentEvent(event),
+      );
+    },
     agentDir,
   });
 
@@ -323,7 +338,10 @@ export async function consultRealtimeVoiceAgent(params: {
   if (!text) {
     const reason = result.meta?.aborted ? "agent run aborted" : "agent returned no speakable text";
     params.logger.warn(`[talk] agent consult produced no answer: ${reason}`);
-    return { text: params.fallbackText ?? "I need a moment to verify that before answering." };
+    return {
+      text: params.fallbackText ?? "I need a moment to verify that before answering.",
+      ...(presentations.length > 0 ? { presentations } : {}),
+    };
   }
-  return { text };
+  return { text, ...(presentations.length > 0 ? { presentations } : {}) };
 }

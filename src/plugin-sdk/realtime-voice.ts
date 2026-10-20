@@ -129,6 +129,10 @@ export {
   type RealtimeVoiceAgentConsultRuntime,
 } from "../talk/agent-consult-runtime.js";
 export {
+  formatRealtimeVoiceConsultResultForSpeech,
+  type RealtimeVoicePresentation,
+} from "../talk/agent-consult-presentations.js";
+export {
   createRealtimeVoiceAgentTalkbackQueue,
   type RealtimeVoiceAgentTalkbackQueue,
   type RealtimeVoiceAgentTalkbackQueueParams,

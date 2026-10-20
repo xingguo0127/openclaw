@@ -15,7 +15,11 @@ import type {
   GatewayRequestContext,
   GatewayRequestHandlers,
 } from "./server-methods/shared-types.js";
-import { registerTalkRealtimeRelayAgentRun } from "./talk-realtime-relay.js";
+import {
+  prepareTalkRealtimeRelayAgentRun,
+  registerTalkRealtimeRelayAgentRun,
+  releaseTalkRealtimeRelayAgentRun,
+} from "./talk-realtime-relay.js";
 import { formatForLog } from "./ws-log.js";
 
 /**
@@ -41,6 +45,9 @@ export async function startTalkRealtimeAgentConsult(params: {
     return { ok: false, error: errorShape(ErrorCodes.INVALID_REQUEST, formatForLog(err)) };
   }
   const idempotencyKey = `talk-${params.callId}-${randomUUID()}`;
+  if (params.relaySessionId && params.connId) {
+    prepareTalkRealtimeRelayAgentRun(idempotencyKey);
+  }
   const normalizedTalk = normalizeTalkSection(params.context.getRuntimeConfig().talk);
   let chatResponse: { ok: true; result: unknown } | { ok: false; error: ErrorShape } | undefined;
   await chatHandlers["chat.send"]({
@@ -74,12 +81,14 @@ export async function startTalkRealtimeAgentConsult(params: {
   } as Parameters<GatewayRequestHandlers[string]>[0]);
 
   if (!chatResponse) {
+    releaseTalkRealtimeRelayAgentRun(idempotencyKey);
     return {
       ok: false,
       error: errorShape(ErrorCodes.UNAVAILABLE, "chat.send did not return a realtime tool result"),
     };
   }
   if (!chatResponse.ok) {
+    releaseTalkRealtimeRelayAgentRun(idempotencyKey);
     return { ok: false, error: chatResponse.error };
   }
   const result = chatResponse.result;
@@ -96,6 +105,7 @@ export async function startTalkRealtimeAgentConsult(params: {
       sessionKey: params.sessionKey,
       runId,
       callId: params.callId,
+      preparedRunId: idempotencyKey,
     });
   }
   return { ok: true, runId, idempotencyKey };
