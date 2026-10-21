@@ -17,7 +17,7 @@ class SpaceContextError extends Error {
 }
 
 function trustedContext(context: OpenClawPluginToolContext) {
-  const missing = (["sessionId", "sessionKey", "runId", "agentDir"] as const).filter(
+  const missing = (["sessionId", "sessionKey", "runId", "agentDir", "agentId"] as const).filter(
     (key) => !context[key],
   );
   if (missing.length) {
@@ -27,14 +27,10 @@ function trustedContext(context: OpenClawPluginToolContext) {
       missing,
     );
   }
-  if (
-    context.trigger !== "user" ||
-    !["main", "agent:main"].includes(context.agentId ?? "") ||
-    isSubagentSessionKey(context.sessionKey!)
-  ) {
+  if (context.trigger !== "user" || isSubagentSessionKey(context.sessionKey!)) {
     throw new SpaceContextError(
       "SPACE_CALLER_NOT_ALLOWED",
-      "空间工具仅接受主 Agent 的用户对话调用。",
+      "空间工具仅接受顶层 Agent 的用户对话调用。",
     );
   }
   if (context.senderIsOwner !== true) {
@@ -85,6 +81,7 @@ async function sourceMessages(context: OpenClawPluginToolContext, args: Record<s
 export function createSpaceMaterialTools(
   context: OpenClawPluginToolContext,
   request: AssistRequest,
+  registeredAgentIds: ReadonlySet<string> = new Set(["main"]),
 ): AnyAgentTool[] {
   const definitions = [
     {
@@ -117,6 +114,13 @@ export function createSpaceMaterialTools(
     async execute(_toolCallId, args) {
       try {
         trustedContext(context);
+        const agentId = context.agentId!.replace(/^agent:/, "");
+        if (!registeredAgentIds.has(agentId)) {
+          throw new SpaceContextError(
+            "SPACE_CALLER_NOT_ALLOWED",
+            "空间工具仅接受已注册的顶层 Agent 调用。",
+          );
+        }
         const payload = args as Record<string, unknown>;
         const body =
           definition.path === "ingest"

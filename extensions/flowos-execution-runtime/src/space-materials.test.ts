@@ -11,6 +11,16 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true })));
 });
 
+const ownerContext = {
+  agentId: "main",
+  agentDir: "/trusted/agent",
+  sessionId: "s1",
+  sessionKey: "agent:main:test",
+  runId: "r1",
+  trigger: "user",
+  senderIsOwner: true,
+};
+
 it("binds real user evidence and runtime identity rather than model supplied context", async () => {
   const root = await mkdtemp(join(tmpdir(), "space-tool-"));
   roots.push(root);
@@ -63,6 +73,40 @@ it("does not call storage for an untrusted or background run", async () => {
   expect(request).not.toHaveBeenCalled();
 });
 
+it("allows a registered non-default top-level agent in a verified user conversation", async () => {
+  const request = vi.fn().mockResolvedValue({ spaces: [] });
+  const agentId = "agent-18736cfe5bfb";
+  const tool = createSpaceMaterialTools(
+    {
+      ...ownerContext,
+      agentId,
+      sessionKey: `agent:${agentId}:main`,
+    },
+    request,
+    new Set(["main", agentId]),
+  )[0];
+  const result = await tool.execute("call", {});
+  expect(result.isError).not.toBe(true);
+  expect(request).toHaveBeenCalledWith("POST", "/api/space-materials/read", {});
+});
+
+it("rejects an unregistered top-level agent", async () => {
+  const request = vi.fn();
+  const tool = createSpaceMaterialTools(
+    {
+      ...ownerContext,
+      agentId: "unregistered",
+      sessionKey: "agent:unregistered:main",
+    },
+    request,
+    new Set(["main"]),
+  )[0];
+  const result = await tool.execute("call", {});
+  expect(result.isError).toBe(true);
+  expect(result.details).toMatchObject({ status: "failed", code: "SPACE_CALLER_NOT_ALLOWED" });
+  expect(request).not.toHaveBeenCalled();
+});
+
 it("accepts saved images before recognition while requiring document content", () => {
   expect(ingestSchema.required).toContain("title");
   expect(ingestSchema.properties.materials.items.required).toEqual(
@@ -72,16 +116,6 @@ it("accepts saved images before recognition while requiring document content", (
   expect(publishSchema.required).toContain("text");
   expect(publishSchema.properties).toHaveProperty("title");
 });
-
-const ownerContext = {
-  agentId: "main",
-  agentDir: "/trusted/agent",
-  sessionId: "s1",
-  sessionKey: "agent:main:test",
-  runId: "r1",
-  trigger: "user",
-  senderIsOwner: true,
-};
 
 it.each([
   [{ senderIsOwner: false }, "SPACE_OWNER_UNVERIFIED"],

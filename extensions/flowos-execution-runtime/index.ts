@@ -243,7 +243,14 @@ export default definePluginEntry({
 
     api.registerTool(
       (context) => [
-        ...createSpaceMaterialTools(context, materialRequest),
+        ...createSpaceMaterialTools(
+          context,
+          materialRequest,
+          new Set([
+            "main",
+            ...(api.runtime.config.current().agents?.list ?? []).map((agent) => agent.id),
+          ]),
+        ),
         ...createFlowosExecutionTools({
           api,
           context,
