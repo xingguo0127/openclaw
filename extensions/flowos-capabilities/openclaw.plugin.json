@@ -15,7 +15,8 @@
   },
   "contracts": {
     "tools": [
-      "flowos_capability"
+      "flowos_capability",
+      "flowos_device_action"
     ]
   }
 }
