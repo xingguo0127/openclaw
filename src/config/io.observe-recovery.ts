@@ -567,6 +567,32 @@ function collectPollutedSecretPlaceholders(
   return output;
 }
 
+// A rotating .bak is the state before the last edit. Prefer the verified promoted
+// snapshot so repeated clobber/recovery cycles do not undo the same user edit.
+function suspiciousRecoveryPaths(configPath: string, entry: ConfigHealthEntry) {
+  return [
+    ...(entry.lastPromotedGood?.hash
+      ? [{ path: resolveLastKnownGoodConfigPath(configPath), hash: entry.lastPromotedGood.hash }]
+      : []),
+    { path: `${configPath}.bak`, hash: undefined },
+  ];
+}
+
+function parseSuspiciousRecoveryCandidate(
+  deps: ObserveRecoveryDeps,
+  raw: string | null,
+  expectedHash: string | undefined,
+) {
+  if (!raw || (expectedHash && hashConfigRaw(raw) !== expectedHash)) {
+    return null;
+  }
+  const candidate = parseBackupConfigRaw(deps, raw);
+  if (!candidate || collectPollutedSecretPlaceholders(candidate.parsed).length > 0) {
+    return null;
+  }
+  return { raw, parsed: candidate.parsed };
+}
+
 export async function maybeRecoverSuspiciousConfigRead(
   params: ConfigReadRecoveryParams,
 ): Promise<ConfigReadRecoveryResult> {
@@ -599,24 +625,34 @@ export async function maybeRecoverSuspiciousConfigRead(
   }
   const { suspicious, suspiciousSignature } = recoveryContext;
 
-  const backupRaw = await params.deps.fs.promises.readFile(backupPath, "utf-8").catch(() => null);
-  if (!backupRaw) {
+  let selected:
+    | { path: string; raw: string; parsed: unknown; fingerprint: ConfigHealthFingerprint }
+    | undefined;
+  for (const candidate of suspiciousRecoveryPaths(params.configPath, entry)) {
+    const raw = await params.deps.fs.promises.readFile(candidate.path, "utf-8").catch(() => null);
+    const parsed = parseSuspiciousRecoveryCandidate(params.deps, raw, candidate.hash);
+    if (!parsed || (params.validateBackup && !(await params.validateBackup(parsed)))) {
+      continue;
+    }
+    const candidateStat = await params.deps.fs.promises.stat(candidate.path).catch(() => null);
+    const fingerprint = createConfigHealthFingerprint({
+      hash: hashConfigRaw(parsed.raw),
+      raw: parsed.raw,
+      parsed: parsed.parsed,
+      gatewaySource: parsed.parsed,
+      stat: candidateStat as ConfigStatMetadataSource,
+      observedAt: now,
+    });
+    if (fingerprint.gatewayMode) {
+      selected = { path: candidate.path, ...parsed, fingerprint };
+      break;
+    }
+  }
+  if (!selected) {
     return returnOriginalConfigRead(params);
   }
-  const backupParse = parseBackupConfigRaw(params.deps, backupRaw);
-  if (!backupParse) {
-    return returnOriginalConfigRead(params);
-  }
-  if (
-    params.validateBackup &&
-    !(await params.validateBackup({ raw: backupRaw, parsed: backupParse.parsed }))
-  ) {
-    return returnOriginalConfigRead(params);
-  }
-  const backup = backupBaseline ?? (await readConfigFingerprintForPath(params.deps, backupPath));
-  if (!backup?.gatewayMode) {
-    return returnOriginalConfigRead(params);
-  }
+  const { path: selectedPath, raw: backupRaw, fingerprint: backup } = selected;
+  const backupParse = selected;
   if (params.allowBackupRecovery && !(await params.allowBackupRecovery())) {
     return returnOriginalConfigRead(params);
   }
@@ -663,7 +699,7 @@ export async function maybeRecoverSuspiciousConfigRead(
       entry,
       backup,
       clobberedPath,
-      backupPath,
+      backupPath: selectedPath,
       restoreErrorDetails,
     }),
   );
@@ -710,26 +746,40 @@ export function maybeRecoverSuspiciousConfigReadSync(
   }
   const { suspicious, suspiciousSignature } = recoveryContext;
 
-  let backupRaw: string;
-  try {
-    backupRaw = params.deps.fs.readFileSync(backupPath, "utf-8");
-  } catch {
+  let selected:
+    | { path: string; raw: string; parsed: unknown; fingerprint: ConfigHealthFingerprint }
+    | undefined;
+  for (const candidate of suspiciousRecoveryPaths(params.configPath, entry)) {
+    let raw: string;
+    try {
+      raw = params.deps.fs.readFileSync(candidate.path, "utf-8");
+    } catch {
+      continue;
+    }
+    const parsed = parseSuspiciousRecoveryCandidate(params.deps, raw, candidate.hash);
+    if (!parsed || (params.validateBackupSync && !params.validateBackupSync(parsed))) {
+      continue;
+    }
+    const candidateStat =
+      params.deps.fs.statSync(candidate.path, { throwIfNoEntry: false }) ?? null;
+    const fingerprint = createConfigHealthFingerprint({
+      hash: hashConfigRaw(parsed.raw),
+      raw: parsed.raw,
+      parsed: parsed.parsed,
+      gatewaySource: parsed.parsed,
+      stat: candidateStat,
+      observedAt: now,
+    });
+    if (fingerprint.gatewayMode) {
+      selected = { path: candidate.path, ...parsed, fingerprint };
+      break;
+    }
+  }
+  if (!selected) {
     return returnOriginalConfigRead(params);
   }
-  const backupParse = parseBackupConfigRaw(params.deps, backupRaw);
-  if (!backupParse) {
-    return returnOriginalConfigRead(params);
-  }
-  if (
-    params.validateBackupSync &&
-    !params.validateBackupSync({ raw: backupRaw, parsed: backupParse.parsed })
-  ) {
-    return returnOriginalConfigRead(params);
-  }
-  const backup = backupBaseline ?? readConfigFingerprintForPathSync(params.deps, backupPath);
-  if (!backup?.gatewayMode) {
-    return returnOriginalConfigRead(params);
-  }
+  const { path: selectedPath, raw: backupRaw, fingerprint: backup } = selected;
+  const backupParse = selected;
 
   const clobberedPath = persistBoundedClobberedConfigSnapshotSync({
     deps: params.deps,
@@ -775,7 +825,7 @@ export function maybeRecoverSuspiciousConfigReadSync(
       entry,
       backup,
       clobberedPath,
-      backupPath,
+      backupPath: selectedPath,
       restoreErrorDetails,
     }),
   );
