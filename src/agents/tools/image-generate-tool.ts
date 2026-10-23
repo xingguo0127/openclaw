@@ -1046,6 +1046,14 @@ export function createImageGenerateTool(options?: {
           providerId: selectedProvider?.id,
           progressSummary: "Generating image",
         });
+        await notifyMediaGenerationAsyncTaskStarted({
+          callback: options?.onAsyncTaskStarted,
+          message: "Image generation started; wait for the generated image completion event.",
+          toolName: "image_generate",
+          handle: taskHandle,
+          onFailure: (message, meta) => log.warn(message, meta),
+        });
+
         scheduleMediaGenerationTaskCompletion({
           lifecycle: imageGenerationTaskLifecycle,
           handle: taskHandle,
@@ -1076,14 +1084,6 @@ export function createImageGenerateTool(options?: {
               taskHandle,
               autoProviderFallback: explicitModelConfig ? false : undefined,
             }),
-        });
-
-        await notifyMediaGenerationAsyncTaskStarted({
-          callback: options?.onAsyncTaskStarted,
-          message: "Image generation started; wait for the generated image completion event.",
-          toolName: "image_generate",
-          handle: taskHandle,
-          onFailure: (message, meta) => log.warn(message, meta),
         });
 
         return buildMediaGenerationStartedToolResult({
