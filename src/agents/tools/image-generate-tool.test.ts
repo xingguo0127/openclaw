@@ -815,6 +815,8 @@ describe("createImageGenerateTool", () => {
           to: "dm:123",
         },
         scheduleBackgroundWork: (work) => {
+          // An immediate provider failure must see the requester already yielding.
+          expect(onAsyncTaskStarted).toHaveBeenCalledOnce();
           scheduled.push(work);
         },
         onAsyncTaskStarted,

@@ -3707,7 +3707,9 @@ export async function runEmbeddedAttempt(
           }
           await steerActiveSessionWithOptionalDeliveryWait(activeSession, text, options);
         },
-        isStreaming: () => activeSession.isStreaming,
+        // A yielding run cannot consume a completion, even if steering commits
+        // it to the transcript. Let the announce path start the follow-up turn.
+        isStreaming: () => activeSession.isStreaming && !yieldDetected,
         isCompacting: () => subscription.isCompacting(),
         supportsTranscriptCommitWait: true,
         sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,

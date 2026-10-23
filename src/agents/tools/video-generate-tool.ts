@@ -1194,6 +1194,14 @@ export function createVideoGenerateTool(options?: {
           providerId: selectedProvider?.id,
           progressSummary: "Generating video",
         });
+        await notifyMediaGenerationAsyncTaskStarted({
+          callback: options?.onAsyncTaskStarted,
+          message: "Video generation started; wait for the generated video completion event.",
+          toolName: "video_generate",
+          handle: taskHandle,
+          onFailure: (message, meta) => log.warn(message, meta),
+        });
+
         scheduleMediaGenerationTaskCompletion({
           lifecycle: videoGenerationTaskLifecycle,
           handle: taskHandle,
@@ -1223,14 +1231,6 @@ export function createVideoGenerateTool(options?: {
               autoProviderFallback: explicitModelConfig ? false : undefined,
               timeoutMs,
             }),
-        });
-
-        await notifyMediaGenerationAsyncTaskStarted({
-          callback: options?.onAsyncTaskStarted,
-          message: "Video generation started; wait for the generated video completion event.",
-          toolName: "video_generate",
-          handle: taskHandle,
-          onFailure: (message, meta) => log.warn(message, meta),
         });
 
         return buildMediaGenerationStartedToolResult({

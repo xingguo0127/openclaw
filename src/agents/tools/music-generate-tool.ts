@@ -746,6 +746,14 @@ export function createMusicGenerateTool(options?: {
           providerId: selectedProviderId,
           progressSummary: "Generating music",
         });
+        await notifyMediaGenerationAsyncTaskStarted({
+          callback: options?.onAsyncTaskStarted,
+          message: "Music generation started; wait for the generated music completion event.",
+          toolName: "music_generate",
+          handle: taskHandle,
+          onFailure: (message, meta) => log.warn(message, meta),
+        });
+
         scheduleMediaGenerationTaskCompletion({
           lifecycle: musicGenerationTaskLifecycle,
           handle: taskHandle,
@@ -771,14 +779,6 @@ export function createMusicGenerateTool(options?: {
               timeoutMs,
               timeoutNormalization: timeout.normalization,
             }),
-        });
-
-        await notifyMediaGenerationAsyncTaskStarted({
-          callback: options?.onAsyncTaskStarted,
-          message: "Music generation started; wait for the generated music completion event.",
-          toolName: "music_generate",
-          handle: taskHandle,
-          onFailure: (message, meta) => log.warn(message, meta),
         });
 
         return buildMediaGenerationStartedToolResult({
