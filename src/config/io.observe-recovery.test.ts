@@ -1,4 +1,5 @@
 // Covers config IO recovery observation after corrupt or missing files.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -271,6 +272,82 @@ describe("config observe recovery", () => {
       warn,
     };
   }
+
+  it.each(["async", "sync"] as const)(
+    "%s recovery keeps the latest Agent roster across repeated clobbers",
+    async (mode) => {
+      await withSuiteHome(async (home) => {
+        const { deps, configPath, auditPath } = makeDeps(home);
+        const old = {
+          ...recoverableTelegramConfig,
+          agents: { list: [{ id: "main", identity: { avatar: "avatars/flame.png" } }] },
+        };
+        await seedConfigBackup(configPath, old);
+        const latest = {
+          ...old,
+          agents: {
+            list: [
+              { id: "main", identity: { avatar: "avatars/ball.png" } },
+              {
+                id: "custom",
+                workspace: "/tenant/custom",
+                identity: { avatar: "avatars/rabbit.png" },
+              },
+            ],
+          },
+        };
+        const snapshot = await makeSnapshot(configPath, latest);
+        for (let attempt = 0; attempt < 2; attempt++) {
+          // A healthy runtime promotes its accepted snapshot before the next deployment.
+          await promoteConfigSnapshotToLastKnownGood({ deps, snapshot });
+          const clobbered = await writeConfigRaw(configPath, { gateway: { mode: "local" } });
+          const params = { deps, configPath, ...clobbered };
+          const recovered =
+            mode === "async"
+              ? await maybeRecoverSuspiciousConfigRead(params)
+              : maybeRecoverSuspiciousConfigReadSync(params);
+          expect(recovered.parsed).toEqual(latest);
+          expect(JSON.parse(await fsp.readFile(configPath, "utf-8"))).toEqual(latest);
+          const event = await readLastObserveEvent(auditPath);
+          expect(event?.restoredBackupPath).toBe(`${configPath}.last-good`);
+          expect(event?.backupHash).toBe(
+            crypto.createHash("sha256").update(snapshot.raw).digest("hex"),
+          );
+        }
+      });
+    },
+  );
+
+  it.each(["async", "sync"] as const)(
+    "%s recovery rejects a tampered last-good and audits the actual fallback",
+    async (mode) => {
+      await withSuiteHome(async (home) => {
+        const { deps, configPath, auditPath } = makeDeps(home);
+        await seedConfigBackup(configPath, recoverableTelegramConfig);
+        const snapshot = await makeSnapshot(configPath, recoverableTelegramConfig);
+        await promoteConfigSnapshotToLastKnownGood({ deps, snapshot });
+        await fsp.writeFile(
+          `${configPath}.last-good`,
+          JSON.stringify({ gateway: { mode: "remote" } }),
+        );
+        const clobbered = await writeClobberedUpdateChannel(configPath);
+        const params = { deps, configPath, ...clobbered };
+        const recovered =
+          mode === "async"
+            ? await maybeRecoverSuspiciousConfigRead(params)
+            : maybeRecoverSuspiciousConfigReadSync(params);
+        expect(recovered.parsed).toEqual(recoverableTelegramConfig);
+        const event = await readLastObserveEvent(auditPath);
+        expect(event?.restoredBackupPath).toBe(`${configPath}.bak`);
+        expect(event?.backupHash).toBe(
+          crypto
+            .createHash("sha256")
+            .update(await fsp.readFile(`${configPath}.bak`))
+            .digest("hex"),
+        );
+      });
+    },
+  );
 
   it("auto-restores suspicious update-channel-only roots from backup", async () => {
     await withSuiteHome(async (home) => {
