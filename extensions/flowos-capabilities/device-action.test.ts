@@ -95,3 +95,32 @@ test("translation tool accepts all five added languages", async () => {
     assert.equal(JSON.parse(result.content[0].text).ok, true);
   }
 });
+
+test("lockscreen images use generated references and wait for the device receipt", async () => {
+  const calls: unknown[][] = [];
+  const tool = createDeviceActionTool(
+    new URL("http://assist:18790"),
+    "fake",
+    { sessionKey: "terminal", runId: "run" },
+    async (...args: unknown[]) => {
+      calls.push(args);
+      return { ok: true };
+    },
+  );
+  const added = await tool.execute("call", {
+    action: "lockscreen.image.add",
+    assetRef: "media://generated/media_test",
+  });
+  assert.equal(JSON.parse(added.content[0].text).ok, true);
+  assert.equal((calls[0][4] as { assetRef: string }).assetRef, "media://generated/media_test");
+  assert.equal(calls[0][5], 105_000);
+  for (const assetRef of [
+    undefined,
+    "https://example.com/image.jpg",
+    "media://generated/../other",
+  ]) {
+    const result = await tool.execute("bad", { action: "lockscreen.image.add", assetRef });
+    assert.equal(JSON.parse(result.content[0].text).error, "invalid_action");
+  }
+  assert.equal(calls.length, 1);
+});
